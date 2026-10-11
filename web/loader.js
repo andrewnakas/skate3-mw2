@@ -410,6 +410,16 @@ async function main() {
   community.label = 'Community maps (skatemods.com)';
   picker.add(community);
   listCommunity(community, params.get('smap'));
+  // Clean-room MW2 maps published with this site (CI writes mw2maps.json from maps/mw2/).
+  const mw2maps = document.createElement('optgroup');
+  mw2maps.label = 'MW2 maps (clean room)';
+  fetch('mw2maps.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : [])).then((list) => {
+    for (const m of list) {
+      const href = new URL(m.file, location.href).href;
+      mw2maps.append(new Option(`${m.title} (${(m.size / 1e6).toFixed(0)} MB)`, `url:${href}`, false, params.get('mapurl') === href));
+    }
+    if (list.length) picker.insertBefore(mw2maps, community);
+  }).catch(() => {});
   const more = document.createElement('optgroup');
   more.label = 'Your own';
   more.append(new Option('Open .skate file...', 'open-file'));
@@ -419,6 +429,7 @@ async function main() {
     const value = picker.value;
     if (value === 'open-file') fileInput.click();
     else if (value.startsWith('smap:')) go('smap', value.slice(5));
+    else if (value.startsWith('url:')) go('mapurl', value.slice(4));
     else if (value) globalThis.skateSelectMap(value);
   };
   fileInput.onchange = async () => {

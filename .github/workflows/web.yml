@@ -34,11 +34,36 @@ jobs:
           mkdir -p site
           wasm-bindgen --target web --no-typescript --out-dir site --out-name skate3rust target/wasm32-unknown-unknown/web/skate3rust.wasm
           cp web/* site/
+          # Clean-room MW2 maps (games/mw2 in skate3-cleanroom; taint 0 before commit).
+          mkdir -p site/maps/mw2
+          cp maps/mw2/*.skate site/maps/mw2/ 2>/dev/null || true
+          python3 -c "import json,os,glob; print(json.dumps([{'title': os.path.basename(p)[:-6], 'file': p[5:], 'size': os.path.getsize(p)} for p in sorted(glob.glob('site/maps/mw2/*.skate'))]))" > site/mw2maps.json
+          cat site/mw2maps.json
           touch site/.nojekyll
           ls -la site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+  map-writer:
+    # tools/mesh_to_skate.py output must parse with the engine's own reader.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native
+          cache-on-failure: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy pillow
+      - name: Write and read back a demo map
+        run: |
+          python tools/mesh_to_skate.py --demo /tmp/demo
+          python tools/mesh_to_skate.py /tmp/demo /tmp/demo.skate
+          cargo run -q -p skate-data --example inspect_skate -- /tmp/demo.skate
   pages:
     if: github.ref == 'refs/heads/main'
     needs: web

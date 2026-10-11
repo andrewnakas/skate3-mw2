@@ -78,6 +78,8 @@ pub(crate) struct Session {
     pub best_streak: u32,
     pub feed: Vec<(String, f32)>,
     pub hurt_flash: f32,
+    /// Bots hold fire until then: entering MW2 and every respawn.
+    pub protected_until: f32,
     pub spots: Vec<[f32; 3]>,
     pub rng: u32,
     footstep: f32,
@@ -403,6 +405,7 @@ fn enter(world: &mut World) {
             best_streak: 0,
             feed: Vec::new(),
             hurt_flash: 0.0,
+            protected_until: now + 3.0,
             spots,
             rng: 0x2545_F491 ^ (now.to_bits() | 1),
             footstep: 0.0,
@@ -418,6 +421,7 @@ fn enter(world: &mut World) {
         s.pitch = 0.0;
         s.hidden = hidden;
         s.now = now;
+        s.protected_until = now + 3.0;
     }
     world.resource_mut::<Mw2>().active = true;
     set_cursor(world, true);
@@ -580,12 +584,13 @@ fn respawn(s: &mut Session) {
     }
     s.health = 100.0;
     s.dead_until = None;
+    s.protected_until = s.now + 2.5;
     s.weapons.refill();
 }
 
 /// Take damage from a bot; returns true if this killed the player.
 pub(crate) fn hurt(s: &mut Session, amount: f32, by: &str) -> bool {
-    if s.dead_until.is_some() {
+    if s.dead_until.is_some() || s.now < s.protected_until {
         return false;
     }
     s.health -= amount;

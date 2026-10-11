@@ -9,6 +9,8 @@ use movement_iw4::{ANGLE2SHORT, CreateAnimsMantleRootDelta, FlatMantleAnimLength
 use playerstate_iw4::{PlayerState, UserCmd, buttons, pm_flags};
 
 const COUNT: usize = 6;
+/// Half-angle of what a bot can see, in degrees.
+const VIEW_HALF_ANGLE: f32 = 65.0;
 const NAMES: [&str; COUNT] = ["Viper", "Nomad", "Hex", "Rook", "Jinx", "Bishop"];
 const RADIUS: f32 = 15.0;
 const HEAD_RADIUS: f32 = 7.0;
@@ -110,8 +112,16 @@ fn place(bot: &mut Bot, spot: [f32; 3], toward: [f32; 3], now: f32) {
 
 pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
     let now = s.now;
-    if s.bots.len() < COUNT && !s.spots.is_empty() {
-        for name in NAMES.iter().skip(s.bots.len()) {
+    // Small parks get fewer bots: 3 below 60 m across, 6 from 120 m.
+    let count = {
+        let (lo, hi) = s.spots.iter().fold(([f32::MAX; 2], [f32::MIN; 2]), |(lo, hi), p| {
+            ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])])
+        });
+        let across = ((hi[0] - lo[0]).max(hi[1] - lo[1]) * super::clip::UNIT).max(0.0);
+        (3 + ((across - 60.0) / 20.0).clamp(0.0, 3.0) as usize).min(COUNT)
+    };
+    if s.bots.len() < count && !s.spots.is_empty() {
+        for name in NAMES.iter().take(count).skip(s.bots.len()) {
             let entity = spawn_body(world);
             s.bots.push(Bot {
                 ps: PlayerState::ZERO,
@@ -136,6 +146,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
     }
     let gun = weapons::bot_gun();
     let player_alive = s.dead_until.is_none();
+    let protected = now < s.protected_until;
     let player_eye = s.eye();
     let player_speed = (s.ps.velocity[0].powi(2) + s.ps.velocity[1].powi(2)).sqrt();
     let clip = s.clip.clone();
@@ -164,7 +175,12 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
         let to = [player_eye[0] - eye[0], player_eye[1] - eye[1], player_eye[2] - eye[2]];
         let flat = (to[0] * to[0] + to[1] * to[1]).sqrt();
         let dist = (flat * flat + to[2] * to[2]).sqrt();
-        let visible = player_alive && dist < 6000.0 && clip.ray(eye, player_eye).is_none();
+        let facing = {
+            let want = to[1].atan2(to[0]).to_degrees();
+            ((want - bot.yaw + 540.0).rem_euclid(360.0) - 180.0).abs() < VIEW_HALF_ANGLE
+        };
+        let visible = player_alive && dist < 6000.0 && (facing || bot.seen_since.is_some())
+            && clip.ray(eye, player_eye).is_none();
         if visible {
             bot.seen_since.get_or_insert(now);
         } else {
@@ -174,7 +190,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
         // Face the player (or the way to them), at a human turn rate.
         let want = to[1].atan2(to[0]).to_degrees();
         let mut delta = (want - bot.yaw + 540.0).rem_euclid(360.0) - 180.0;
-        delta = delta.clamp(-300.0 * dt, 300.0 * dt);
+        delta = delta.clamp(-160.0 * dt, 160.0 * dt);
         bot.yaw += delta;
         let pitch = -(to[2].atan2(flat.max(1.0))).to_degrees();
 
@@ -242,16 +258,16 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
 
         // Shoot: reaction time, short bursts, accuracy falls with range and target speed.
         let mut shot = None;
-        if visible && bot.seen_since.is_some_and(|t| now - t > 0.45) && now >= bot.next_shot {
+        if visible && !protected && bot.seen_since.is_some_and(|t| now - t > 0.8) && now >= bot.next_shot {
             bot.burst += 1;
-            bot.next_shot = if bot.burst >= 5 {
+            bot.next_shot = if bot.burst >= 4 {
                 bot.burst = 0;
-                now + 0.7 + r1 * 0.6
+                now + 1.0 + r1 * 0.8
             } else {
-                now + 0.1
+                now + 0.13
             };
-            let accuracy = ((0.5 - dist / 7000.0) * (1.0 - (player_speed / 380.0).min(0.6))).clamp(0.06, 0.5);
-            let damage = if dist < 1500.0 { 24.0 } else { 18.0 };
+            let accuracy = ((0.3 - dist / 9000.0) * (1.0 - (player_speed / 380.0).min(0.6))).clamp(0.04, 0.3);
+            let damage = if dist < 1500.0 { 20.0 } else { 15.0 };
             shot = Some((eye, r2 < accuracy, damage, dist, bot.name));
         }
         if let Some((from, hit, damage, dist, name)) = shot {
