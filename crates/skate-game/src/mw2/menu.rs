@@ -415,13 +415,13 @@ fn draw(
                     position_type: PositionType::Absolute,
                     left: Val::Px(0.0),
                     top: Val::Px(0.0),
-                    width: Val::Percent(42.0),
+                    width: Val::Percent(36.0),
                     height: Val::Percent(100.0),
-                    padding: UiRect { left: Val::Percent(7.0), top: Val::Percent(12.0), ..default() },
+                    padding: UiRect { left: Val::Percent(5.0), top: Val::Percent(9.0), ..default() },
                     flex_direction: FlexDirection::Column,
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.01, 0.02, 0.01, 0.62)),
+                BackgroundColor(Color::srgba(0.01, 0.02, 0.01, 0.5)),
             ))
             .with_children(|panel| {
                 panel.spawn((Text::new(title), tf(64.0), TextColor(Color::srgb(0.93, 0.95, 0.9))));
@@ -460,13 +460,13 @@ fn draw(
                     TextColor(Color::srgb(0.72, 0.76, 0.7)),
                     Node { width: Val::Px(440.0), ..default() },
                 ));
+                panel.spawn((
+                    Text::new("ENTER select   ESC back   ARROWS change   |   PAD: A select   B back   D-PAD change"),
+                    TextFont { font_size: 12.0, ..default() },
+                    TextColor(Color::srgb(0.55, 0.6, 0.55)),
+                    Node { width: Val::Px(440.0), margin: UiRect::top(Val::Px(14.0)), ..default() },
+                ));
             });
-            root.spawn((
-                Text::new("ENTER select   ESC back   ARROWS change   ·   PAD: A select  B back  D-PAD change"),
-                TextFont { font_size: 13.0, ..default() },
-                TextColor(Color::srgb(0.6, 0.65, 0.6)),
-                Node { position_type: PositionType::Absolute, left: Val::Percent(3.0), bottom: Val::Px(54.0), ..default() },
-            ));
         });
 }
 
