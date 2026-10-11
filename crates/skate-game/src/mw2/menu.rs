@@ -72,6 +72,9 @@ pub(crate) struct Menu {
     esc_used: bool,
     /// Escape / Start was pressed this frame (seen before the key is cleared).
     esc_pressed: bool,
+    /// When an Escape was last acted on. On the web one press arrives twice,
+    /// as the key and a frame later as the pad's Start: one press, one action.
+    last_escape: f32,
 }
 
 impl Menu {
@@ -98,7 +101,7 @@ fn setup(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
     let font = Font::try_from_bytes(include_bytes!("fonts/BebasNeue-Regular.ttf").to_vec())
         .map(|f| fonts.add(f))
         .unwrap_or_default();
-    commands.insert_resource(Menu { screen: Some(Screen::Main), selected: 0, stack: Vec::new(), start: false, font, built: None, attract: 0.0, allow_engine: false, esc_used: false, esc_pressed: false });
+    commands.insert_resource(Menu { screen: Some(Screen::Main), selected: 0, stack: Vec::new(), start: false, font, built: None, attract: 0.0, allow_engine: false, esc_used: false, esc_pressed: false, last_escape: -10.0 });
 }
 
 fn gun_line(i: usize) -> String {
@@ -180,15 +183,21 @@ fn input(
     mut engine_menu: ResMut<crate::graphics_menu::Menu>,
     mut time: ResMut<Time<Virtual>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    real: Res<Time<Real>>,
 ) {
     let pad = |b: GamepadButton| pads.iter().any(|p| p.just_pressed(b));
-    let escape = keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0;
-    menu.esc_pressed = escape;
+    let seen = keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0;
     // On foot (or in our menus) Escape / Start belong to MW2, not the skate menu.
-    if escape && (menu.open() || mw2.active) {
+    if seen && (menu.open() || mw2.active) {
         keys.clear_just_pressed(KeyCode::Escape);
         nav.pressed &= !0x10;
     }
+    let now = real.elapsed_secs();
+    let escape = seen && now - menu.last_escape > 0.3;
+    if escape {
+        menu.last_escape = now;
+    }
+    menu.esc_pressed = escape;
     // Opening the pause menu is the guard's job (it runs after every other menu).
     let Some(screen) = menu.screen else { return };
     if escape {
@@ -469,6 +478,7 @@ fn guard(
     mut mods: ResMut<crate::modding::menu::ModMenu>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut typed: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    real: Res<Time<Real>>,
 ) {
     // Raw key messages: unlike ButtonInput they cannot have been cleared by
     // anyone earlier in the frame.
@@ -476,7 +486,13 @@ fn guard(
         .read()
         .any(|k| k.key_code == KeyCode::Escape && k.state.is_pressed() && !k.repeat);
     let flagged = std::mem::take(&mut menu.esc_pressed);
-    let escape = flagged || raw || keys.just_pressed(KeyCode::Escape) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start));
+    let now = real.elapsed_secs();
+    let fresh = (raw || keys.just_pressed(KeyCode::Escape) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start)))
+        && now - menu.last_escape > 0.3;
+    if fresh {
+        menu.last_escape = now;
+    }
+    let escape = flagged || fresh;
     if escape {
         info!(
             "MW2_ESC flagged={flagged} raw={raw} used={} screen={:?} on_foot={} engine_menu={}",
