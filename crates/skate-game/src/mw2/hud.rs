@@ -74,9 +74,9 @@ pub(crate) fn spawn(mut commands: Commands) {
             root.spawn(text(Part::Hitmarker, 26.0, Node { left: Val::Percent(50.0), top: Val::Percent(50.0), margin: UiRect { left: Val::Px(-8.0), top: Val::Px(-16.0), ..default() }, ..abs() }));
             root.spawn(text(Part::Ammo, 22.0, Node { right: Val::Px(28.0), bottom: Val::Px(64.0), ..abs() }));
             root.spawn(text(Part::Score, 18.0, Node { left: Val::Percent(50.0), top: Val::Px(14.0), margin: UiRect { left: Val::Px(-190.0), ..default() }, width: Val::Px(380.0), ..abs() }));
-            root.spawn(text(Part::Feed, 15.0, Node { left: Val::Px(20.0), bottom: Val::Px(120.0), ..abs() }));
+            root.spawn(text(Part::Feed, 15.0, Node { left: Val::Px(20.0), bottom: Val::Px(140.0), ..abs() }));
             root.spawn(text(Part::Center, 30.0, Node { left: Val::Percent(50.0), top: Val::Percent(38.0), margin: UiRect { left: Val::Px(-150.0), ..default() }, width: Val::Px(300.0), ..abs() }));
-            root.spawn(text(Part::Hint, 14.0, Node { left: Val::Px(20.0), bottom: Val::Px(20.0), ..abs() }));
+            root.spawn(text(Part::Hint, 13.0, Node { left: Val::Px(20.0), bottom: Val::Px(46.0), ..abs() }));
         });
 }
 
@@ -159,7 +159,7 @@ pub(crate) fn update(
             }
             Part::Hint => {
                 if let Some(mut t) = text {
-                    t.0 = "J skate  |  WASD move  Space jump  C crouch  Z prone  Shift sprint  |  1-4 / Q guns  R reload".into();
+                    t.0 = "J skate | WASD Space C Z Shift | 1-4 Q guns | R reload".into();
                 }
             }
         }

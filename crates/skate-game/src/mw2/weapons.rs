@@ -453,6 +453,7 @@ fn play(world: &mut World, sfx: Sfx, gain: f32) {
 fn fire(world: &mut World, s: &mut Session, gun: &Gun) {
     let now = s.now;
     play(world, gun.sfx, 0.8);
+    bots::hear_shot(s);
     s.weapons.flash_until = now + 0.05;
     s.weapons.kickback = 1.0;
     let ads = s.weapons.ads;
@@ -523,7 +524,7 @@ fn animate_viewmodel(world: &mut World, s: &Session, gun: &Gun, _dt: f32) {
     let w = &s.weapons;
     let ads = w.ads;
     // Hip: low right. ADS: centred on the sight line (the scope hides it).
-    let hip = Vec3::new(0.15, -0.16, -0.42);
+    let hip = Vec3::new(0.12, -0.13, -0.36);
     let aim = Vec3::new(0.0, -0.075 - if gun.scope { 0.03 } else { 0.0 }, -0.2);
     let mut pos = hip.lerp(aim, ads);
     let speed = (s.ps.velocity[0].powi(2) + s.ps.velocity[1].powi(2)).sqrt() / 190.0;
@@ -549,7 +550,9 @@ fn animate_viewmodel(world: &mut World, s: &Session, gun: &Gun, _dt: f32) {
         pos.y -= 1.0;
     }
     if let Some(mut t) = world.get_mut::<Transform>(root) {
-        *t = Transform::from_translation(pos).with_rotation(rot * Quat::from_rotation_x(w.kickback * 0.05));
+        *t = Transform::from_translation(pos)
+            .with_rotation(rot * Quat::from_rotation_x(w.kickback * 0.05))
+            .with_scale(Vec3::splat(0.7));
     }
     if let Some(flash) = world.resource::<Viewmodel>().flash {
         let on = s.now < w.flash_until;

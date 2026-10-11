@@ -11,6 +11,8 @@ use playerstate_iw4::{PlayerState, UserCmd, buttons, pm_flags};
 const COUNT: usize = 6;
 /// Half-angle of what a bot can see, in degrees.
 const VIEW_HALF_ANGLE: f32 = 65.0;
+/// How many bots may fight the player at the same time.
+const MAX_ENGAGED: usize = 2;
 const NAMES: [&str; COUNT] = ["Viper", "Nomad", "Hex", "Rook", "Jinx", "Bishop"];
 const RADIUS: f32 = 15.0;
 const HEAD_RADIUS: f32 = 7.0;
@@ -33,6 +35,13 @@ pub(crate) struct Bot {
     jump: bool,
     old_buttons: u32,
     ms_carry: f32,
+    /// Patrol target when the bot does not know where the player is.
+    goal: [f32; 3],
+    goal_until: f32,
+    /// Heard a shot or got hit: hunts the player until then.
+    alert_until: f32,
+    /// Fighting the player; at most `MAX_ENGAGED` at once.
+    engaged: bool,
 }
 
 #[derive(Resource)]
@@ -108,6 +117,9 @@ fn place(bot: &mut Bot, spot: [f32; 3], toward: [f32; 3], now: f32) {
     bot.seen_since = None;
     bot.next_shot = now + 1.0;
     bot.stuck = 0.0;
+    bot.engaged = false;
+    bot.alert_until = 0.0;
+    bot.goal_until = 0.0;
 }
 
 pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
@@ -141,6 +153,10 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
                 jump: false,
                 old_buttons: 0,
                 ms_carry: 0.0,
+                goal: [0.0; 3],
+                goal_until: 0.0,
+                alert_until: 0.0,
+                engaged: false,
             });
         }
     }
@@ -170,6 +186,9 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
         }
         let r1 = s.random();
         let r2 = s.random();
+        let pick = ((s.random() * s.spots.len() as f32) as usize).min(s.spots.len() - 1);
+        let patrol = s.spots[pick];
+        let engaged_others = s.bots.iter().enumerate().filter(|(j, b)| *j != i && b.alive && b.engaged).count();
         let bot = &mut s.bots[i];
         let eye = [bot.ps.origin[0], bot.ps.origin[1], bot.ps.origin[2] + bot.ps.view_height_current];
         let to = [player_eye[0] - eye[0], player_eye[1] - eye[1], player_eye[2] - eye[2]];
@@ -179,16 +198,30 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             let want = to[1].atan2(to[0]).to_degrees();
             ((want - bot.yaw + 540.0).rem_euclid(360.0) - 180.0).abs() < VIEW_HALF_ANGLE
         };
-        let visible = player_alive && dist < 6000.0 && (facing || bot.seen_since.is_some())
+        let alerted = now < bot.alert_until;
+        let visible = player_alive && dist < 6000.0 && (facing || alerted || bot.engaged)
             && clip.ray(eye, player_eye).is_none();
-        if visible {
+        bot.engaged = visible && (bot.engaged || engaged_others < MAX_ENGAGED);
+        if bot.engaged {
             bot.seen_since.get_or_insert(now);
         } else {
             bot.seen_since = None;
         }
+        let hunting = bot.engaged || (alerted && player_alive);
+        if !hunting && (now >= bot.goal_until || {
+            let g = [bot.goal[0] - bot.ps.origin[0], bot.goal[1] - bot.ps.origin[1]];
+            g[0] * g[0] + g[1] * g[1] < 80.0 * 80.0
+        }) {
+            bot.goal = patrol;
+            bot.goal_until = now + 6.0 + r2 * 6.0;
+        }
 
-        // Face the player (or the way to them), at a human turn rate.
-        let want = to[1].atan2(to[0]).to_degrees();
+        // Face the player when hunting, else the patrol goal, at a human turn rate.
+        let want = if hunting {
+            to[1].atan2(to[0]).to_degrees()
+        } else {
+            (bot.goal[1] - bot.ps.origin[1]).atan2(bot.goal[0] - bot.ps.origin[0]).to_degrees()
+        };
         let mut delta = (want - bot.yaw + 540.0).rem_euclid(360.0) - 180.0;
         delta = delta.clamp(-160.0 * dt, 160.0 * dt);
         bot.yaw += delta;
@@ -198,9 +231,9 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             bot.strafe = (if r1 < 0.5 { -1.0 } else { 1.0 }) * (0.5 + r2 * 0.5);
             bot.strafe_until = now + 0.8 + r1 * 1.4;
         }
-        let (forward, right) = if !player_alive {
-            (0.0, 0.0)
-        } else if !visible {
+        let (forward, right) = if !hunting {
+            (0.55, 0.0)
+        } else if !bot.engaged {
             (1.0, bot.strafe * 0.3)
         } else if dist > 1400.0 {
             (0.6, bot.strafe)
@@ -258,7 +291,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
 
         // Shoot: reaction time, short bursts, accuracy falls with range and target speed.
         let mut shot = None;
-        if visible && !protected && bot.seen_since.is_some_and(|t| now - t > 1.1) && now >= bot.next_shot {
+        if bot.engaged && !protected && bot.seen_since.is_some_and(|t| now - t > 1.1) && now >= bot.next_shot {
             bot.burst += 1;
             bot.next_shot = if bot.burst >= 4 {
                 bot.burst = 0;
@@ -379,6 +412,17 @@ fn ray_cylinder(o: [f32; 3], d: [f32; 3], base: [f32; 3], r: f32, height: f32) -
     (0.0..=height).contains(&z).then_some(t)
 }
 
+/// The player fired: bots within earshot come looking.
+pub(crate) fn hear_shot(s: &mut Session) {
+    let (now, p) = (s.now, s.ps.origin);
+    for bot in s.bots.iter_mut().filter(|b| b.alive) {
+        let d = ((bot.ps.origin[0] - p[0]).powi(2) + (bot.ps.origin[1] - p[1]).powi(2)).sqrt();
+        if d < 1600.0 {
+            bot.alert_until = bot.alert_until.max(now + 5.0);
+        }
+    }
+}
+
 /// Apply damage; returns true on a kill.
 pub(crate) fn damage(s: &mut Session, i: usize, amount: f32, weapon: &str, head: bool) -> bool {
     let now = s.now;
@@ -388,7 +432,7 @@ pub(crate) fn damage(s: &mut Session, i: usize, amount: f32, weapon: &str, head:
     }
     bot.health -= amount;
     // Getting shot makes them turn and fight.
-    bot.seen_since.get_or_insert(now - 0.2);
+    bot.alert_until = now + 8.0;
     if bot.health > 0.0 {
         return false;
     }
