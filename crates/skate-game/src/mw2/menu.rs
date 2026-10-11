@@ -186,9 +186,12 @@ fn input(
     real: Res<Time<Real>>,
 ) {
     let pad = |b: GamepadButton| pads.iter().any(|p| p.just_pressed(b));
-    let seen = keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0;
+    // The web input maps both Escape and Enter onto the pad's Start bit, so
+    // that bit says nothing about Escape: keyboard Escape is the key itself,
+    // a real pad's Start is read from the gamepad.
+    let seen = keys.just_pressed(KeyCode::Escape) || pad(GamepadButton::Start);
     // On foot (or in our menus) Escape / Start belong to MW2, not the skate menu.
-    if seen && (menu.open() || mw2.active) {
+    if (seen || nav.pressed & 0x10 != 0) && (menu.open() || mw2.active) {
         keys.clear_just_pressed(KeyCode::Escape);
         nav.pressed &= !0x10;
     }
