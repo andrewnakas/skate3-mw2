@@ -557,14 +557,23 @@ fn run(world: &mut World) {
         }
 
         // MW2 regen: a few seconds without damage, then health refills.
-        if !dead && now - s.last_hurt > 5.0 {
-            s.health = (s.health + 40.0 * dt).min(100.0);
+        if !dead && now - s.last_hurt > 4.0 {
+            s.health = (s.health + 50.0 * dt).min(100.0);
         }
         s.hurt_flash = (s.hurt_flash - dt * 2.0).max(0.0);
         s.feed.retain(|(_, at)| now - at < 6.0);
 
         weapons::tick(world, &mut s, dt);
         bots::tick(world, &mut s, dt);
+
+        if (now / 2.0).floor() != ((now - dt) / 2.0).floor() {
+            let o = s.ps.origin;
+            info!(
+                "MW2_STATE pos=[{:.0},{:.0},{:.0}] health={:.0} kills={} deaths={} bots_alive={} gun={} ammo={:?}",
+                o[0], o[1], o[2], s.health, s.kills, s.deaths,
+                s.bots.iter().filter(|b| b.alive).count(), s.weapons.gun().name, s.weapons.ammo()
+            );
+        }
 
         // Camera at the eye, with the gun's ADS field of view.
         let eye = from_iw(s.eye());
@@ -584,7 +593,7 @@ fn respawn(s: &mut Session) {
     }
     s.health = 100.0;
     s.dead_until = None;
-    s.protected_until = s.now + 2.5;
+    s.protected_until = s.now + 4.0;
     s.weapons.refill();
 }
 

@@ -523,7 +523,7 @@ fn animate_viewmodel(world: &mut World, s: &Session, gun: &Gun, _dt: f32) {
     let w = &s.weapons;
     let ads = w.ads;
     // Hip: low right. ADS: centred on the sight line (the scope hides it).
-    let hip = Vec3::new(0.13, -0.13, -0.3);
+    let hip = Vec3::new(0.15, -0.16, -0.42);
     let aim = Vec3::new(0.0, -0.075 - if gun.scope { 0.03 } else { 0.0 }, -0.2);
     let mut pos = hip.lerp(aim, ads);
     let speed = (s.ps.velocity[0].powi(2) + s.ps.velocity[1].powi(2)).sqrt() / 190.0;

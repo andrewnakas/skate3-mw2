@@ -202,10 +202,10 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             (0.0, 0.0)
         } else if !visible {
             (1.0, bot.strafe * 0.3)
-        } else if dist > 900.0 {
-            (0.8, bot.strafe)
-        } else if dist < 300.0 {
-            (-0.5, bot.strafe)
+        } else if dist > 1400.0 {
+            (0.6, bot.strafe)
+        } else if dist < 500.0 {
+            (-0.6, bot.strafe)
         } else {
             (0.0, bot.strafe)
         };
@@ -258,7 +258,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
 
         // Shoot: reaction time, short bursts, accuracy falls with range and target speed.
         let mut shot = None;
-        if visible && !protected && bot.seen_since.is_some_and(|t| now - t > 0.8) && now >= bot.next_shot {
+        if visible && !protected && bot.seen_since.is_some_and(|t| now - t > 1.1) && now >= bot.next_shot {
             bot.burst += 1;
             bot.next_shot = if bot.burst >= 4 {
                 bot.burst = 0;
@@ -266,8 +266,8 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             } else {
                 now + 0.13
             };
-            let accuracy = ((0.3 - dist / 9000.0) * (1.0 - (player_speed / 380.0).min(0.6))).clamp(0.04, 0.3);
-            let damage = if dist < 1500.0 { 20.0 } else { 15.0 };
+            let accuracy = ((0.16 - dist / 15000.0) * (1.0 - (player_speed / 380.0).min(0.6))).clamp(0.03, 0.16);
+            let damage = if dist < 1500.0 { 14.0 } else { 10.0 };
             shot = Some((eye, r2 < accuracy, damage, dist, bot.name));
         }
         if let Some((from, hit, damage, dist, name)) = shot {
