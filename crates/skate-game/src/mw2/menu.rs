@@ -468,10 +468,21 @@ fn guard(
     mut engine_menu: ResMut<crate::graphics_menu::Menu>,
     mut mods: ResMut<crate::modding::menu::ModMenu>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    mut typed: MessageReader<bevy::input::keyboard::KeyboardInput>,
 ) {
-    let escape = std::mem::take(&mut menu.esc_pressed)
-        || keys.just_pressed(KeyCode::Escape)
-        || pads.iter().any(|p| p.just_pressed(GamepadButton::Start));
+    // Raw key messages: unlike ButtonInput they cannot have been cleared by
+    // anyone earlier in the frame.
+    let raw = typed
+        .read()
+        .any(|k| k.key_code == KeyCode::Escape && k.state.is_pressed() && !k.repeat);
+    let flagged = std::mem::take(&mut menu.esc_pressed);
+    let escape = flagged || raw || keys.just_pressed(KeyCode::Escape) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start));
+    if escape {
+        info!(
+            "MW2_ESC flagged={flagged} raw={raw} used={} screen={:?} on_foot={} engine_menu={}",
+            menu.esc_used, menu.screen, mw2.active, engine_menu.open
+        );
+    }
     let ours = mw2.booted || menu.open();
     if menu.allow_engine && !engine_menu.open {
         menu.allow_engine = false;
