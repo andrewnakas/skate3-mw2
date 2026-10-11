@@ -172,11 +172,14 @@ impl Session {
             return None;
         }
         let mut fallback = None;
-        for attempt in 0..48 {
+        // Height window only when `from` is on the map (not a player who fell out).
+        let on_map = from[2] > self.clip.min_z - 100.0;
+        for attempt in 0..64 {
             let i = (self.random() * self.spots.len() as f32) as usize % self.spots.len();
             let p = self.spots[i];
             let d = ((p[0] - from[0]).powi(2) + (p[1] - from[1]).powi(2)).sqrt();
-            if d < min || d > max || (p[2] - from[2]).abs() > 400.0 {
+            let loose = attempt >= 48 || !on_map;
+            if !loose && (d < min || d > max || (p[2] - from[2]).abs() > 400.0) {
                 continue;
             }
             let start = [p[0], p[1], p[2] + 48.0];
@@ -517,6 +520,13 @@ fn enter(world: &mut World, boot: bool) {
         }
     }
     let now = world.resource::<Time>().elapsed_secs();
+    info!(
+        "MW2_ENTER boot={boot} tris={} min_z={:.0} skater_feet={:?} origin={:?}",
+        clip.triangle_count(),
+        clip.min_z,
+        feet,
+        origin
+    );
     let mut hidden = Vec::new();
     let mut roots = world.query_filtered::<(Entity, &mut Visibility), With<crate::world::PlayerRoot>>();
     for (entity, mut vis) in roots.iter_mut(world) {
@@ -584,6 +594,7 @@ fn enter(world: &mut World, boot: bool) {
         if let Some(spot) = s.spawn_spot(from, 0.0, 1e9) {
             s.ps = spawn_player_state(spot, yaw);
         }
+        info!("MW2_BOOT spots={} spawn={:?}", s.spots.len(), s.ps.origin);
         s.match_left = MATCH_SECONDS;
         s.feed("Kill the bots. J drops you onto a board.".into());
     }
@@ -826,6 +837,7 @@ fn run(world: &mut World) {
 
 fn respawn(s: &mut Session) {
     let from = s.bots.iter().filter(|b| b.alive).map(|b| b.ps.origin).next().unwrap_or(s.ps.origin);
+    info!("MW2_RESPAWN from={:?} player_z={:.0} min_z={:.0} spots={}", from, s.ps.origin[2], s.clip.min_z, s.spots.len());
     let spot = s.spawn_spot(from, 800.0, 3000.0).or_else(|| s.spawn_spot(s.ps.origin, 0.0, 1e9));
     if let Some(spot) = spot {
         let yaw = s.yaw;

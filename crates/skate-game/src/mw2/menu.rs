@@ -70,6 +70,8 @@ pub(crate) struct Menu {
     pub allow_engine: bool,
     /// Escape was used by our menus this frame (the guard must not reuse it).
     esc_used: bool,
+    /// Escape / Start was pressed this frame (seen before the key is cleared).
+    esc_pressed: bool,
 }
 
 impl Menu {
@@ -96,7 +98,7 @@ fn setup(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
     let font = Font::try_from_bytes(include_bytes!("fonts/BebasNeue-Regular.ttf").to_vec())
         .map(|f| fonts.add(f))
         .unwrap_or_default();
-    commands.insert_resource(Menu { screen: Some(Screen::Main), selected: 0, stack: Vec::new(), start: false, font, built: None, attract: 0.0, allow_engine: false, esc_used: false });
+    commands.insert_resource(Menu { screen: Some(Screen::Main), selected: 0, stack: Vec::new(), start: false, font, built: None, attract: 0.0, allow_engine: false, esc_used: false, esc_pressed: false });
 }
 
 fn gun_line(i: usize) -> String {
@@ -181,6 +183,7 @@ fn input(
 ) {
     let pad = |b: GamepadButton| pads.iter().any(|p| p.just_pressed(b));
     let escape = keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0;
+    menu.esc_pressed = escape;
     // On foot (or in our menus) Escape / Start belong to MW2, not the skate menu.
     if escape && (menu.open() || mw2.active) {
         keys.clear_just_pressed(KeyCode::Escape);
@@ -466,7 +469,9 @@ fn guard(
     mut mods: ResMut<crate::modding::menu::ModMenu>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    let escape = keys.just_pressed(KeyCode::Escape) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start));
+    let escape = std::mem::take(&mut menu.esc_pressed)
+        || keys.just_pressed(KeyCode::Escape)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::Start));
     let ours = mw2.booted || menu.open();
     if menu.allow_engine && !engine_menu.open {
         menu.allow_engine = false;
