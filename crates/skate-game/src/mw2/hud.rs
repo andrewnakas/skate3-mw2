@@ -149,13 +149,16 @@ pub(crate) fn update(
     mut parts: Query<(&Part, &mut Visibility, &mut Node, Option<&mut Text>, Option<&mut BackgroundColor>)>,
     mut skate_only: Query<&mut Visibility, (With<SkateOnly>, Without<Part>, Without<HideInMatch>)>,
     mut in_match: Query<&mut Visibility, (With<HideInMatch>, Without<Part>, Without<SkateOnly>)>,
+    menu: Res<super::menu::Menu>,
 ) {
-    // The skate HUD shows only while skating (or before the match starts).
+    // The skate HUD shows only on the board, never under our menus.
+    let skating = mw2.booted && !mw2.active && !menu.open();
     for mut vis in &mut skate_only {
-        *vis = if mw2.active { Visibility::Hidden } else { Visibility::Inherited };
+        *vis = if skating { Visibility::Inherited } else { Visibility::Hidden };
     }
+    // The bike mod's hint has no place in this game.
     for mut vis in &mut in_match {
-        *vis = if mw2.booted { Visibility::Hidden } else { Visibility::Inherited };
+        *vis = Visibility::Hidden;
     }
     let height = windows.single().map(|w| w.height()).unwrap_or(720.0);
     let Some(s) = session.filter(|_| mw2.booted) else {
@@ -197,7 +200,7 @@ pub(crate) fn update(
             Some(if edge < 1.0 { (x * edge, y * edge) } else { (x, y) })
         })
         .collect();
-    let left = (s.match_end - s.now).clamp(0.0, MATCH_SECONDS);
+    let left = s.match_left.clamp(0.0, MATCH_SECONDS);
     for (part, mut vis, mut node, text, background) in &mut parts {
         if part.on_foot_only() && !on_foot {
             *vis = Visibility::Hidden;

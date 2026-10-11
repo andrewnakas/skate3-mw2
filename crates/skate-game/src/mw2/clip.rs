@@ -55,6 +55,8 @@ pub(crate) struct ClipWorld {
     dims: [usize; 2],
     cells: Vec<Vec<u32>>,
     pub(crate) source_len: usize,
+    /// Lowest collision point: anything well below it has fallen out.
+    pub(crate) min_z: f32,
 }
 
 impl ClipWorld {
@@ -87,7 +89,9 @@ impl ClipWorld {
                 }
             }
         }
-        Self { tris, min: lo, dims, cells, source_len }
+        let min_z = tris.iter().flatten().map(|v| v[2]).fold(f32::INFINITY, f32::min);
+        let min_z = if min_z.is_finite() { min_z } else { 0.0 };
+        Self { tris, min: lo, dims, cells, source_len, min_z }
     }
 
     fn cell_range_of(min: [f32; 2], dims: [usize; 2], points: impl Iterator<Item = V>) -> ([usize; 2], [usize; 2]) {

@@ -119,7 +119,8 @@ pub(crate) struct Session {
     pub controls: Controls,
     pub now: f32,
     pub score: u32,
-    pub match_end: f32,
+    /// Seconds left in the match (counts only while the game runs).
+    pub match_left: f32,
     pub match_over_until: Option<f32>,
     /// Centre-screen points popups ("+100").
     pub popups: Vec<(String, f32)>,
@@ -554,7 +555,7 @@ fn enter(world: &mut World, boot: bool) {
             controls: Controls::default(),
             now,
             score: 0,
-            match_end: now + MATCH_SECONDS,
+            match_left: MATCH_SECONDS,
             match_over_until: None,
             popups: Vec::new(),
             uav_ready: false,
@@ -583,7 +584,7 @@ fn enter(world: &mut World, boot: bool) {
         if let Some(spot) = s.spawn_spot(from, 0.0, 1e9) {
             s.ps = spawn_player_state(spot, yaw);
         }
-        s.match_end = now + MATCH_SECONDS;
+        s.match_left = MATCH_SECONDS;
         s.feed("Kill the bots. J drops you onto a board.".into());
     }
     world.resource_mut::<Mw2>().active = true;
@@ -598,6 +599,9 @@ fn enter(world: &mut World, boot: bool) {
 /// Skating: the match goes on. The player is wherever the skater is; bots
 /// hunt the board, and getting killed puts the player back on foot.
 fn ride(world: &mut World) {
+    if world.resource::<menu::Menu>().open() {
+        return;
+    }
     let dt = world.resource::<Time>().delta_secs().min(0.1);
     let now = world.resource::<Time>().elapsed_secs();
     let m = world.resource::<crate::physics::SkaterRuntime>().animated_skeleton.roots.animation_to_world;
@@ -625,6 +629,9 @@ fn common_tick(world: &mut World, s: &mut Session, dt: f32) {
     s.hurt_flash = (s.hurt_flash - dt * 2.0).max(0.0);
     s.feed.retain(|(_, at)| now - at < 6.0);
     s.popups.retain(|(_, at)| now - at < 1.4);
+    if s.match_over_until.is_none() {
+        s.match_left -= dt;
+    }
     match s.match_over_until {
         Some(until) if now >= until => {
             // Next match.
@@ -633,12 +640,12 @@ fn common_tick(world: &mut World, s: &mut Session, dt: f32) {
             s.deaths = 0;
             s.streak = 0;
             s.uav_ready = false;
-            s.match_end = now + MATCH_SECONDS;
+            s.match_left = MATCH_SECONDS;
             s.match_over_until = None;
             s.protected_until = now + 3.0;
             s.feed("New match".into());
         }
-        None if s.score >= SCORE_LIMIT || now >= s.match_end => {
+        None if s.score >= SCORE_LIMIT || s.match_left <= 0.0 => {
             let won = s.score >= SCORE_LIMIT;
             s.match_over_until = Some(now + 8.0);
             s.popup(if won { "VICTORY".into() } else { "TIME UP".into() });
@@ -690,6 +697,9 @@ fn exit(world: &mut World) {
 fn run(world: &mut World) {
     let dt = world.resource::<Time>().delta_secs().min(0.1);
     let now = world.resource::<Time>().elapsed_secs();
+    if world.resource::<menu::Menu>().open() {
+        return;
+    }
     let paused = menu_open(world);
     world.resource_scope(|world, mut s: Mut<Session>| {
         s.now = now;
@@ -759,7 +769,7 @@ fn run(world: &mut World) {
             s.ps = ps;
             s.old_buttons = cmd.buttons;
             // Fell out of the map: put the player back on solid ground.
-            if s.ps.origin[2] < -20_000.0 {
+            if s.ps.origin[2] < s.clip.min_z - 400.0 {
                 respawn(&mut s);
             }
             let moved = ((s.ps.origin[0] - before[0]).powi(2) + (s.ps.origin[1] - before[1]).powi(2)).sqrt();

@@ -1,5 +1,5 @@
 //! Main-thread SDK adapter. Lua never receives World, entity IDs, or asset handles.
-mod menu;
+pub(crate) mod menu;
 pub(crate) mod network;
 mod panel;
 pub(crate) mod vehicles;

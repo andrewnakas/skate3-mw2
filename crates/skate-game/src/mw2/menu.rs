@@ -66,6 +66,10 @@ pub(crate) struct Menu {
     font: Handle<Font>,
     built: Option<u64>,
     attract: f32,
+    /// Options > Graphics opened the skate engine's menu on purpose.
+    pub allow_engine: bool,
+    /// Escape was used by our menus this frame (the guard must not reuse it).
+    esc_used: bool,
 }
 
 impl Menu {
@@ -81,7 +85,7 @@ struct MenuRoot;
 struct RowButton(usize);
 
 pub(crate) fn install(app: &mut App) {
-    app.add_systems(Startup, setup).add_systems(
+    app.add_systems(PostUpdate, guard).add_systems(Startup, setup).add_systems(
         PreUpdate,
         input.after(crate::customiser::navigation).before(crate::graphics_menu::MenuInput),
     )
@@ -92,7 +96,7 @@ fn setup(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
     let font = Font::try_from_bytes(include_bytes!("fonts/BebasNeue-Regular.ttf").to_vec())
         .map(|f| fonts.add(f))
         .unwrap_or_default();
-    commands.insert_resource(Menu { screen: Some(Screen::Main), selected: 0, stack: Vec::new(), start: false, font, built: None, attract: 0.0 });
+    commands.insert_resource(Menu { screen: Some(Screen::Main), selected: 0, stack: Vec::new(), start: false, font, built: None, attract: 0.0, allow_engine: false, esc_used: false });
 }
 
 fn gun_line(i: usize) -> String {
@@ -182,20 +186,15 @@ fn input(
         keys.clear_just_pressed(KeyCode::Escape);
         nav.pressed &= !0x10;
     }
-    let Some(screen) = menu.screen else {
-        if escape && mw2.active && !engine_menu.open {
-            menu.screen = Some(Screen::Pause);
-            menu.selected = 0;
-            time.pause();
-            for mut c in &mut cursor {
-                c.grab_mode = CursorGrabMode::None;
-                c.visible = true;
-            }
-        }
+    // Opening the pause menu is the guard's job (it runs after every other menu).
+    let Some(screen) = menu.screen else { return };
+    if escape {
+        menu.esc_used = true;
+    }
+    if menu.allow_engine && engine_menu.open {
+        // The engine's graphics menu is up over Options: it owns the keys.
         return;
-    };
-    // While our menu is up the skate menu must not take the keys.
-    engine_menu.open = engine_menu.open && screen == Screen::Options;
+    }
     let list = rows(screen, &class, &settings);
     let up = keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::KeyW) || pad(GamepadButton::DPadUp);
     let down = keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::KeyS) || pad(GamepadButton::DPadDown);
@@ -274,7 +273,10 @@ fn input(
                 // Back to the main menu; the page reload restarts cleanly.
                 reload(None);
             }
-            Action::EngineMenu => engine_menu.open = true,
+            Action::EngineMenu => {
+                menu.allow_engine = true;
+                engine_menu.open = true;
+            }
             Action::Map(i) => reload(Some(MAPS[i].0)),
             _ => {}
         }
@@ -450,4 +452,36 @@ fn draw(
                 Node { position_type: PositionType::Absolute, left: Val::Percent(3.0), bottom: Val::Px(54.0), ..default() },
             ));
         });
+}
+
+/// Runs after every other menu: during a match the skate engine's menu and
+/// the mod panel stay shut (unless Options > Graphics asked for it), and
+/// Escape / Start on foot opens MW2's pause menu.
+fn guard(
+    mut menu: ResMut<Menu>,
+    mw2: Res<Mw2>,
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    mut engine_menu: ResMut<crate::graphics_menu::Menu>,
+    mut mods: ResMut<crate::modding::menu::ModMenu>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    let escape = keys.just_pressed(KeyCode::Escape) || pads.iter().any(|p| p.just_pressed(GamepadButton::Start));
+    let ours = mw2.booted || menu.open();
+    if menu.allow_engine && !engine_menu.open {
+        menu.allow_engine = false;
+    }
+    if ours && !menu.allow_engine {
+        engine_menu.open = false;
+        mods.open = false;
+    }
+    if escape && !std::mem::take(&mut menu.esc_used) && menu.screen.is_none() && mw2.active {
+        menu.screen = Some(Screen::Pause);
+        menu.selected = 0;
+        for mut c in &mut cursor {
+            c.grab_mode = CursorGrabMode::None;
+            c.visible = true;
+        }
+    }
+    menu.esc_used = false;
 }

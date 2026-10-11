@@ -296,7 +296,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
                 bot.strafe = -bot.strafe;
                 bot.stuck = 0.0;
             }
-            if bot.ps.origin[2] < -20_000.0 {
+            if bot.ps.origin[2] < clip.min_z - 400.0 {
                 bot.alive = false;
                 bot.respawn_at = now + 1.0;
             }
