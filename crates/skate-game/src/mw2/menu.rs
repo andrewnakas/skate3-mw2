@@ -213,7 +213,8 @@ fn input(
     let left = keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA) || pad(GamepadButton::DPadLeft);
     let right = keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD) || pad(GamepadButton::DPadRight);
     let mut accept = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || pad(GamepadButton::South);
-    let back = escape || pad(GamepadButton::East);
+    // Escape is handled in the guard (open / back / resume); pad B here.
+    let back = pad(GamepadButton::East);
     if up {
         menu.selected = cycle(menu.selected, list.len(), -1);
     }
@@ -507,12 +508,30 @@ fn guard(
         engine_menu.open = false;
         mods.open = false;
     }
-    if escape && !std::mem::take(&mut menu.esc_used) && menu.screen.is_none() && mw2.active {
-        menu.screen = Some(Screen::Pause);
-        menu.selected = 0;
-        for mut c in &mut cursor {
-            c.grab_mode = CursorGrabMode::None;
-            c.visible = true;
+    if escape && !(menu.allow_engine && engine_menu.open) {
+        match menu.screen {
+            None if mw2.active => {
+                menu.screen = Some(Screen::Pause);
+                menu.selected = 0;
+                for mut c in &mut cursor {
+                    c.grab_mode = CursorGrabMode::None;
+                    c.visible = true;
+                }
+            }
+            // Escape on the pause menu resumes; deeper screens go back one.
+            Some(Screen::Pause) => {
+                menu.screen = None;
+                menu.stack.clear();
+                for mut c in &mut cursor {
+                    c.grab_mode = CursorGrabMode::Locked;
+                    c.visible = false;
+                }
+            }
+            Some(Screen::Main) | None => {}
+            Some(_) => {
+                menu.screen = Some(menu.stack.pop().unwrap_or(Screen::Main));
+                menu.selected = 0;
+            }
         }
     }
     menu.esc_used = false;
