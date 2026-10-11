@@ -746,7 +746,9 @@ pub(crate) fn spawn(
                         format,
                         RenderAssetUsages::RENDER_WORLD,
                     );
-                    if role == 3 || role == 6 || cube {
+                    // Albedo (0) and normal / ORM (2) need mips too: tiled detail shimmers without them.
+                    let mipped = role == 0 || role == 2 || role == 3 || role == 6 || cube;
+                    if mipped {
                         let (bytes, levels) = crate::retail_render::mip_chain(
                             &source.rgba,
                             source.width,
@@ -769,6 +771,9 @@ pub(crate) fn spawn(
                     if role != 1 && role != 4 && role != 6 && !cube {
                         sampler.address_mode_u = bevy::image::ImageAddressMode::Repeat;
                         sampler.address_mode_v = bevy::image::ImageAddressMode::Repeat;
+                    }
+                    if mipped && (role == 0 || role == 2) {
+                        sampler.anisotropy_clamp = 8;
                     }
                     image.sampler = ImageSampler::Descriptor(sampler);
                     images.add(image)
