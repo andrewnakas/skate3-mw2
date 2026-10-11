@@ -172,6 +172,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
     let protected = now < s.protected_until || s.match_over_until.is_some();
     let player_eye = s.eye();
     let player_speed = (s.ps.velocity[0].powi(2) + s.ps.velocity[1].powi(2)).sqrt();
+    let ninja = s.weapons.class.ninja();
     let clip = s.clip.clone();
     for i in 0..s.bots.len() {
         if !s.bots[i].alive {
@@ -205,6 +206,10 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             let want = to[1].atan2(to[0]).to_degrees();
             ((want - bot.yaw + 540.0).rem_euclid(360.0) - 180.0).abs() < VIEW_HALF_ANGLE
         };
+        // Footsteps: a moving player is heard nearby, unless they run Ninja.
+        if !ninja && player_alive && player_speed > 120.0 && dist < 600.0 {
+            bot.alert_until = bot.alert_until.max(now + 2.0);
+        }
         let alerted = now < bot.alert_until;
         let visible = player_alive && dist < 6000.0 && (facing || alerted || bot.engaged)
             && clip.ray(eye, player_eye).is_none()
@@ -273,7 +278,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             movement_iw4::pmove(
                 &mut bot.ps,
                 &mut cmd,
-                pmove_context(bot.old_buttons, &gun, false),
+                pmove_context(bot.old_buttons, &gun, false, &super::class::Class { perks: [2, 2, 2], ..Default::default() }),
                 &backend,
                 &FlatMantleAnimLength::default(),
                 &CreateAnimsMantleRootDelta,
@@ -462,7 +467,10 @@ pub(crate) fn damage(s: &mut Session, i: usize, amount: f32, weapon: &str, head:
         s.score += points;
         s.popup(if head { format!("Headshot! +{points}") } else { format!("+{points}") });
     }
-    if s.streak == 3 {
+    if s.weapons.class.scavenger() {
+        s.weapons.scavenge();
+    }
+    if s.streak == if s.weapons.class.hardline() { 2 } else { 3 } {
         s.uav_ready = true;
         s.feed("UAV ready: press 4".into());
     } else if matches!(s.streak, 5 | 7 | 11 | 25) {

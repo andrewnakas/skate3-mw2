@@ -433,7 +433,7 @@ fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> 
             retire(world, mods, &key);
             let entity = world
                 .spawn((
-                    crate::mw2::SkateOnly,
+                    crate::mw2::HideInMatch,
                     Text::new(text),
                     TextFont {
                         font_size: 19.,

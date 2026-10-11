@@ -47,8 +47,8 @@ struct Look {
     tint: [f32; 3],
 }
 
-/// The class: an assault rifle, an SMG, a sniper and a shotgun, as on Rust.
-fn guns() -> [Gun; 4] {
+/// Primaries: ACR, M4A1, UMP45, Intervention. Secondaries: USP .45, SPAS-12.
+pub(crate) fn guns() -> [Gun; 6] {
     [
         Gun {
             name: "ACR",
@@ -73,6 +73,30 @@ fn guns() -> [Gun; 4] {
             ads_ms: 250.0,
             scope: false,
             look: Look { body: 0.30, barrel: 0.16, mag: 0.11, stock: 0.14, scope: false, pump: false, tint: [0.16, 0.17, 0.15] },
+        },
+        Gun {
+            name: "M4A1",
+            sfx: Sfx::Rifle,
+            damage: (30.0, 20.0),
+            range: (1500.0, 2400.0),
+            rpm: 800.0,
+            mag: 30,
+            reserve: 90,
+            reload_s: 2.2,
+            auto: true,
+            pellets: 1,
+            hip_spread: 3.0,
+            ads_spread: 0.12,
+            ads_fov: 50.0,
+            kick: 0.4,
+            head_mult: 1.4,
+            body_mult: 1.0,
+            move_scale: 0.95,
+            ads_move_scale: 0.5,
+            sprint_scale: 1.0,
+            ads_ms: 230.0,
+            scope: false,
+            look: Look { body: 0.30, barrel: 0.15, mag: 0.11, stock: 0.15, scope: false, pump: false, tint: [0.11, 0.11, 0.1] },
         },
         Gun {
             name: "UMP45",
@@ -124,6 +148,30 @@ fn guns() -> [Gun; 4] {
             look: Look { body: 0.34, barrel: 0.30, mag: 0.06, stock: 0.17, scope: true, pump: false, tint: [0.24, 0.22, 0.17] },
         },
         Gun {
+            name: "USP .45",
+            sfx: Sfx::Smg,
+            damage: (40.0, 30.0),
+            range: (300.0, 1000.0),
+            rpm: 600.0,
+            mag: 12,
+            reserve: 36,
+            reload_s: 1.7,
+            auto: false,
+            pellets: 1,
+            hip_spread: 2.0,
+            ads_spread: 0.5,
+            ads_fov: 58.0,
+            kick: 1.1,
+            head_mult: 1.4,
+            body_mult: 1.0,
+            move_scale: 1.0,
+            ads_move_scale: 0.75,
+            sprint_scale: 1.0,
+            ads_ms: 150.0,
+            scope: false,
+            look: Look { body: 0.17, barrel: 0.02, mag: 0.0, stock: 0.0, scope: false, pump: false, tint: [0.09, 0.09, 0.09] },
+        },
+        Gun {
             name: "SPAS-12",
             sfx: Sfx::Shotgun,
             damage: (40.0, 20.0),
@@ -151,9 +199,13 @@ fn guns() -> [Gun; 4] {
 }
 
 pub(crate) struct Loadout {
-    guns: [Gun; 4],
-    ammo: [(u32, u32); 4],
+    guns: [Gun; 6],
+    ammo: [(u32, u32); 6],
+    /// Primary and secondary gun indices; `current` is the one in hand.
+    slots: [usize; 2],
+    pub slot: usize,
     pub current: usize,
+    pub class: super::class::Class,
     ready_at: f32,
     reload_until: Option<f32>,
     switch_until: f32,
@@ -167,16 +219,22 @@ pub(crate) struct Loadout {
     knife_ready: f32,
     knife_until: f32,
     pub throw_until: f32,
+    /// The options' field of view (MW2 cg_fov).
+    pub base_fov: f32,
 }
 
 impl Loadout {
-    pub fn new() -> Self {
+    pub fn new(class: &super::class::Class) -> Self {
         let guns = guns();
         let ammo = std::array::from_fn(|i| (guns[i].mag, guns[i].reserve));
+        let slots = [class.primary.min(5), class.secondary.min(5)];
         Self {
             guns,
             ammo,
-            current: 0,
+            slots,
+            slot: 0,
+            current: slots[0],
+            class: *class,
             ready_at: 0.0,
             reload_until: None,
             switch_until: 0.0,
@@ -189,6 +247,7 @@ impl Loadout {
             knife_ready: 0.0,
             knife_until: 0.0,
             throw_until: 0.0,
+            base_fov: 65.0,
         }
     }
     pub fn gun(&self) -> &Gun {
@@ -208,17 +267,29 @@ impl Loadout {
     }
     /// Vertical field of view in radians, between hip (65) and the gun's ADS zoom.
     pub fn fov(&self) -> f32 {
-        let hip = vertical_fov(65.0);
-        let ads = vertical_fov(self.gun().ads_fov);
+        let hip = vertical_fov(self.base_fov);
+        let ads = vertical_fov(self.gun().ads_fov * self.base_fov / 65.0);
         hip + (ads - hip) * self.ads
     }
     /// Look sensitivity follows the zoom.
     pub fn zoom_scale(&self) -> f32 {
-        (self.fov() / vertical_fov(65.0)).clamp(0.2, 1.0)
+        (self.fov() / vertical_fov(self.base_fov)).clamp(0.2, 1.0)
     }
     pub fn crosshair_gap(&self) -> f32 {
-        let g = self.gun();
-        (g.hip_spread + self.bloom) * (1.0 - self.ads)
+        (self.hip_spread() + self.bloom) * (1.0 - self.ads)
+    }
+    fn hip_spread(&self) -> f32 {
+        self.gun().hip_spread * if self.class.steady_aim() { 0.65 } else { 1.0 }
+    }
+    fn reload_time(&self) -> f32 {
+        self.gun().reload_s * if self.class.sleight_of_hand() { 0.5 } else { 1.0 }
+    }
+    /// Scavenger: a fallen enemy's ammo tops up both guns.
+    pub fn scavenge(&mut self) {
+        for slot in self.slots {
+            let g = &self.guns[slot];
+            self.ammo[slot].1 = (self.ammo[slot].1 + g.mag).min(g.reserve * 2);
+        }
     }
     pub fn scoped(&self) -> bool {
         self.gun().scope && self.ads > 0.9
@@ -400,9 +471,11 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
     let dead = s.dead_until.is_some();
 
     // Weapon switch: 1-4, Q or Y.
-    let wanted = c.weapon_slot.or(c.next_weapon.then(|| (s.weapons.current + 1) % 4));
-    if let Some(slot) = wanted.filter(|w| *w != s.weapons.current && !dead) {
-        s.weapons.current = slot;
+    // Primary / secondary: wheel, middle click or Y swap; 1 and 2 pick.
+    let wanted = c.weapon_slot.filter(|w| *w < 2).or(c.next_weapon.then(|| 1 - s.weapons.slot));
+    if let Some(slot) = wanted.filter(|w| *w != s.weapons.slot && !dead) {
+        s.weapons.slot = slot;
+        s.weapons.current = s.weapons.slots[slot];
         s.weapons.reload_until = None;
         s.weapons.switch_until = now + 0.45;
     }
@@ -429,7 +502,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
     let (mag, reserve) = s.weapons.ammo[i];
     let busy = s.weapons.reloading() || now < s.weapons.switch_until || dead;
     if c.reload && !busy && mag < gun.mag && reserve > 0 {
-        s.weapons.reload_until = Some(now + gun.reload_s);
+        s.weapons.reload_until = Some(now + s.weapons.reload_time());
         play(world, Sfx::Reload, 0.7);
     }
     // Knife: MW2's melee kills in one hit at lunge range.
@@ -444,7 +517,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             let d = [b.ps.origin[0] - eye[0], b.ps.origin[1] - eye[1]];
             let dist = (d[0] * d[0] + d[1] * d[1]).sqrt();
             let ahead = (d[0] * f[0] + d[1] * f[1]) / dist.max(1.0);
-            (dist < 90.0 && ahead > 0.5 && (b.ps.origin[2] - s.ps.origin[2]).abs() < 60.0).then_some(i)
+            (dist < if s.weapons.class.commando() { 180.0 } else { 90.0 } && ahead > 0.5 && (b.ps.origin[2] - s.ps.origin[2]).abs() < 60.0).then_some(i)
         });
         if let Some(i) = target {
             s.weapons.hitmarker_until = now + 0.18;
@@ -462,7 +535,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             if c.fire_pressed {
                 play(world, Sfx::Empty, 0.6);
                 if reserve > 0 {
-                    s.weapons.reload_until = Some(now + gun.reload_s);
+                    s.weapons.reload_until = Some(now + s.weapons.reload_time());
                     play(world, Sfx::Reload, 0.7);
                 }
             }
@@ -486,7 +559,7 @@ fn fire(world: &mut World, s: &mut Session, gun: &Gun) {
     s.weapons.flash_until = now + 0.05;
     s.weapons.kickback = 1.0;
     let ads = s.weapons.ads;
-    let spread = (gun.hip_spread + s.weapons.bloom) * (1.0 - ads) + gun.ads_spread * ads;
+    let spread = (s.weapons.hip_spread() + s.weapons.bloom) * (1.0 - ads) + gun.ads_spread * ads;
     let eye = s.eye();
     let dir = s.view_dir();
     // A basis around the view for the spread cone.
@@ -506,7 +579,8 @@ fn fire(world: &mut World, s: &mut Session, gun: &Gun) {
         let (dist, impact) = match bot_hit {
             Some((idx, dist, head)) => {
                 let falloff = ((dist - gun.range.0) / (gun.range.1 - gun.range.0).max(1.0)).clamp(0.0, 1.0);
-                let base = gun.damage.0 + (gun.damage.1 - gun.damage.0) * falloff;
+                let base = (gun.damage.0 + (gun.damage.1 - gun.damage.0) * falloff)
+                    * if s.weapons.class.stopping_power() { 1.4 } else { 1.0 };
                 let amount = base * if head { gun.head_mult } else { gun.body_mult };
                 hit_any = true;
                 if bots::damage(s, idx, amount, gun.name, head) {
@@ -567,7 +641,7 @@ fn animate_viewmodel(world: &mut World, s: &Session, gun: &Gun, _dt: f32) {
         pos += Vec3::new(-0.04, -0.03, 0.03);
     }
     if let Some(until) = w.reload_until {
-        let left = (until - s.now) / gun.reload_s.max(0.1);
+        let left = (until - s.now) / w.reload_time().max(0.1);
         let dip = (left * std::f32::consts::PI).sin().max(0.0);
         rot *= Quat::from_rotation_x(-0.6 * dip) * Quat::from_rotation_z(0.4 * dip);
         pos.y -= 0.06 * dip;

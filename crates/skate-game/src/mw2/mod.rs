@@ -12,6 +12,8 @@
 
 pub(crate) mod audio;
 mod bots;
+pub(crate) mod class;
+pub(crate) mod menu;
 mod grenades;
 pub(crate) mod clip;
 mod hud;
@@ -46,12 +48,18 @@ pub(crate) struct Mw2 {
     /// The match has started (the first spawn happened).
     pub(crate) booted: bool,
     boot_frames: u32,
+    /// The pause menu asked to drop onto the board.
+    pub(crate) board_request: bool,
 }
 
 /// UI that belongs to skating (the original scoring HUD, mod overlays):
 /// hidden while on foot.
 #[derive(Component)]
 pub(crate) struct SkateOnly;
+
+/// UI with no place in a match (the bike mod's hint): hidden once it starts.
+#[derive(Component)]
+pub(crate) struct HideInMatch;
 
 /// A match: first to the score limit, or the most when time runs out.
 pub(crate) const MATCH_SECONDS: f32 = 600.0;
@@ -104,6 +112,8 @@ pub(crate) struct Session {
     pub rng: u32,
     footstep: f32,
     pub weapons: weapons::Loadout,
+    /// The class to spawn with (Create-a-Class changes apply on the next spawn).
+    pub class: class::Class,
     pub bots: Vec<bots::Bot>,
     pub controls: Controls,
     pub now: f32,
@@ -188,6 +198,8 @@ pub(crate) struct Mw2Plugin;
 impl Plugin for Mw2Plugin {
     fn build(&self, app: &mut App) {
         audio::install(app);
+        class::install(app);
+        menu::install(app);
         app.init_resource::<Mw2>()
             .add_systems(Startup, hud::spawn)
             .add_systems(
@@ -226,7 +238,8 @@ fn spawn_player_state(origin: [f32; 3], yaw: f32) -> PlayerState {
 }
 
 /// IW4L's `pmove_context` with MW2's default dvars and the held gun's scales.
-fn pmove_context(old_buttons: u32, gun: &weapons::Gun, ads: bool) -> PmoveSingleContext {
+fn pmove_context(old_buttons: u32, gun: &weapons::Gun, ads: bool, class: &class::Class) -> PmoveSingleContext {
+    let light = if class.lightweight() { 1.07 } else { 1.0 };
     let air = AirMoveContext {
         player_spectate_speed_scale: 1.0,
         shellshock_gravity_scale: 1.0,
@@ -239,8 +252,8 @@ fn pmove_context(old_buttons: u32, gun: &weapons::Gun, ads: bool) -> PmoveSingle
                 player_strafe_speed_scale: 0.8,
                 player_sprint_speed_scale: 1.5,
                 player_last_stand_crawl_speed_scale: 0.15,
-                weapon_move_speed_scale: gun.move_scale,
-                weapon_ads_move_speed_scale: gun.ads_move_scale,
+                weapon_move_speed_scale: gun.move_scale * light,
+                weapon_ads_move_speed_scale: gun.ads_move_scale * light,
                 shellshock_affects_movement: false,
             },
             weapon_move_scale: 1.0,
@@ -262,7 +275,7 @@ fn pmove_context(old_buttons: u32, gun: &weapons::Gun, ads: bool) -> PmoveSingle
         view_angles: ViewAngleClamp { pitch_up: 85.0, pitch_down: 85.0, unclamped_pitch_bit: false },
         sprint: SprintContext {
             weapon_max_sprint_time: get_max_sprint_time(gun.sprint_scale, 4.0),
-            sprint_forever: false,
+            sprint_forever: class.marathon(),
             min_sprint_time_seconds: 1.0,
             sprint_delay_seconds: 0.0,
             sprint_forward_minimum: 105,
@@ -291,14 +304,15 @@ fn pmove_context(old_buttons: u32, gun: &weapons::Gun, ads: bool) -> PmoveSingle
 fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
     let keys = world.resource::<ButtonInput<KeyCode>>();
     let mouse = world.resource::<ButtonInput<MouseButton>>();
+    let settings = *world.resource::<class::Settings>();
     let motion = world.resource::<AccumulatedMouseMotion>().delta;
     let wheel = world.resource::<bevy::input::mouse::AccumulatedMouseScroll>().delta.y;
     let axis = |neg: KeyCode, pos: KeyCode| f32::from(i8::from(keys.pressed(pos)) - i8::from(keys.pressed(neg)));
     let mut c = Controls {
         forward: axis(KeyCode::KeyS, KeyCode::KeyW),
         right: axis(KeyCode::KeyA, KeyCode::KeyD),
-        // MW2 default: m_yaw 0.022 x sensitivity 5.
-        look: Vec2::new(-motion.x, motion.y) * 0.11,
+        // MW2: m_yaw 0.022 degrees per count x the sensitivity slider.
+        look: Vec2::new(-motion.x, motion.y * if settings.invert { -1.0 } else { 1.0 }) * 0.022 * settings.sensitivity,
         fire: mouse.pressed(MouseButton::Left),
         ads: mouse.pressed(MouseButton::Right),
         jump: keys.pressed(KeyCode::Space),
@@ -332,19 +346,26 @@ fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
         }
         let (rx, ry) = (dead(get(GamepadAxis::RightStickX)), dead(get(GamepadAxis::RightStickY)));
         // Console MW2 turns at roughly 180 deg/s at full deflection, with a curve.
-        c.look += Vec2::new(-rx * rx.abs(), -ry * ry.abs()) * 180.0 * dt;
+        let invert = if settings.invert { -1.0 } else { 1.0 };
+        c.look += Vec2::new(-rx * rx.abs(), -ry * ry.abs() * invert) * 180.0 * dt * settings.sensitivity / 5.0;
         let analog = |b: GamepadButton| pad.get(b).unwrap_or(if pad.pressed(b) { 1.0 } else { 0.0 });
         c.fire |= analog(GamepadButton::RightTrigger2) > 0.3;
         c.ads |= analog(GamepadButton::LeftTrigger2) > 0.3;
         c.jump |= pad.pressed(GamepadButton::South);
-        pad_b = pad_b.or(Some(pad.pressed(GamepadButton::East)).filter(|b| *b));
+        // Tactical swaps stance (B) and melee (R3).
+        let (stance_button, melee_button) = if settings.pad_layout == 1 {
+            (GamepadButton::RightThumb, GamepadButton::East)
+        } else {
+            (GamepadButton::East, GamepadButton::RightThumb)
+        };
+        pad_b = pad_b.or(Some(pad.pressed(stance_button)).filter(|b| *b));
+        c.knife |= pad.just_pressed(melee_button) && !pad.pressed(GamepadButton::LeftThumb);
         c.frag |= pad.just_pressed(GamepadButton::RightTrigger);
         c.smoke |= pad.just_pressed(GamepadButton::LeftTrigger);
         c.scores |= pad.pressed(GamepadButton::Select);
         c.sprint |= pad.pressed(GamepadButton::LeftThumb);
         c.reload |= pad.just_pressed(GamepadButton::West);
         c.next_weapon |= pad.just_pressed(GamepadButton::North);
-        c.knife |= pad.just_pressed(GamepadButton::RightThumb) && !pad.pressed(GamepadButton::LeftThumb);
         c.streak_key |= pad.just_pressed(GamepadButton::DPadRight);
         let both = pad.pressed(GamepadButton::LeftThumb) && pad.pressed(GamepadButton::RightThumb);
         if both && (pad.just_pressed(GamepadButton::LeftThumb) || pad.just_pressed(GamepadButton::RightThumb)) {
@@ -373,9 +394,8 @@ fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
 }
 
 fn menu_open(world: &World) -> bool {
-    world
-        .get_resource::<crate::graphics_menu::Menu>()
-        .is_some_and(|m| m.open)
+    world.get_resource::<crate::graphics_menu::Menu>().is_some_and(|m| m.open)
+        || world.get_resource::<menu::Menu>().is_some_and(|m| m.open())
 }
 
 fn set_cursor(world: &mut World, locked: bool) {
@@ -391,7 +411,13 @@ fn toggle(world: &mut World) {
     let (controls, toggle) = read_controls(world, previous_fire);
     publish_on_foot(world);
     if !world.resource::<Mw2>().booted {
-        boot(world);
+        if world.resource::<menu::Menu>().start {
+            boot(world);
+        }
+        return;
+    }
+    if std::mem::take(&mut world.resource_mut::<Mw2>().board_request) && world.resource::<Mw2>().active {
+        exit(world);
         return;
     }
     let active = world.resource::<Mw2>().active;
@@ -495,6 +521,7 @@ fn enter(world: &mut World, boot: bool) {
         *vis = Visibility::Hidden;
     }
 
+    let class = *world.resource::<class::Class>();
     let fresh = !world.contains_resource::<Session>() || world.resource::<Session>().clip.source_len != count;
     if fresh {
         let spots = clip.walkable_spots();
@@ -519,7 +546,8 @@ fn enter(world: &mut World, boot: bool) {
             spots,
             rng: 0x2545_F491 ^ (now.to_bits() | 1),
             footstep: 0.0,
-            weapons: weapons::Loadout::new(),
+            weapons: weapons::Loadout::new(&class),
+            class,
             bots: Vec::new(),
             controls: Controls::default(),
             now,
@@ -674,6 +702,7 @@ fn run(world: &mut World) {
         }
         let c = if dead { Controls::default() } else { s.controls };
 
+        s.weapons.base_fov = world.resource::<class::Settings>().fov;
         // Look: the gun's ADS zoom slows the turn, as on console.
         let zoom = s.weapons.zoom_scale();
         s.yaw += c.look.x * zoom;
@@ -712,7 +741,7 @@ fn run(world: &mut World) {
                 rightmove: (c.right * 127.0).round().clamp(-127.0, 127.0) as i8,
                 ..Default::default()
             };
-            let context = pmove_context(s.old_buttons, &gun, c.ads);
+            let context = pmove_context(s.old_buttons, &gun, c.ads, &s.weapons.class);
             let world_clip = s.clip.clone();
             let backend = clip::Backend { world: &world_clip };
             let before = s.ps.origin;
@@ -739,9 +768,11 @@ fn run(world: &mut World) {
             let stride = if s.ps.pm_flags & playerstate_iw4::pm_flags::SPRINTING != 0 { 90.0 } else { 70.0 };
             if s.footstep > stride {
                 s.footstep = 0.0;
-                world.resource_scope(|world, sounds: Mut<Sounds>| {
-                    sounds.play(&mut world.commands(), Sfx::Footstep, 0.35);
-                });
+                if !s.weapons.class.ninja() {
+                    world.resource_scope(|world, sounds: Mut<Sounds>| {
+                        sounds.play(&mut world.commands(), Sfx::Footstep, 0.35);
+                    });
+                }
             }
         }
 
@@ -791,7 +822,7 @@ fn respawn(s: &mut Session) {
     s.health = 100.0;
     s.dead_until = None;
     s.protected_until = s.now + 4.0;
-    s.weapons.refill();
+    s.weapons = weapons::Loadout::new(&s.class);
     s.grenades.refill();
     s.pad_stance = 0;
 }

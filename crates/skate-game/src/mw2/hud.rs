@@ -2,7 +2,7 @@
 //! kill feed, points popups, damage and scope. On the board only the match
 //! parts stay; the skate HUD (`SkateOnly`) is shown instead of the gun parts.
 
-use super::{MATCH_SECONDS, Mw2, SCORE_LIMIT, Session, SkateOnly};
+use super::{HideInMatch, MATCH_SECONDS, Mw2, SCORE_LIMIT, Session, SkateOnly};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -147,11 +147,15 @@ pub(crate) fn update(
     session: Option<Res<Session>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut parts: Query<(&Part, &mut Visibility, &mut Node, Option<&mut Text>, Option<&mut BackgroundColor>)>,
-    mut skate_only: Query<&mut Visibility, (With<SkateOnly>, Without<Part>)>,
+    mut skate_only: Query<&mut Visibility, (With<SkateOnly>, Without<Part>, Without<HideInMatch>)>,
+    mut in_match: Query<&mut Visibility, (With<HideInMatch>, Without<Part>, Without<SkateOnly>)>,
 ) {
     // The skate HUD shows only while skating (or before the match starts).
     for mut vis in &mut skate_only {
         *vis = if mw2.active { Visibility::Hidden } else { Visibility::Inherited };
+    }
+    for mut vis in &mut in_match {
+        *vis = if mw2.booted { Visibility::Hidden } else { Visibility::Inherited };
     }
     let height = windows.single().map(|w| w.height()).unwrap_or(720.0);
     let Some(s) = session.filter(|_| mw2.booted) else {

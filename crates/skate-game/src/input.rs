@@ -82,8 +82,9 @@ fn publish_actions(
     mut published: ResMut<PublishedTickInput>,
     menu: Option<Res<crate::graphics_menu::Menu>>,
     mw2: Res<crate::mw2::Mw2>,
+    mw2_menu: Option<Res<crate::mw2::menu::Menu>>,
 ) {
-    if !crate::graphics_menu::gameplay_active(menu) || mw2.active {
+    if !crate::graphics_menu::gameplay_active(menu) || mw2.active || mw2_menu.is_some_and(|m| m.open()) {
         input.discard_gameplay();
     }
     input.publish_actions();

@@ -145,7 +145,7 @@ pub(crate) fn present(
         // Vehicle motion is already interpolated with the rider/chassis. A separate
         // follow filter introduces relative motion and makes fixed ticks visible.
         vehicle_blend.previous = Some(*transform);
-        if let Some((eye, fov)) = mw2.camera.filter(|_| mw2.active) {
+        if let Some((eye, fov)) = mw2.camera {
             *transform = eye;
             if let Projection::Perspective(p) = &mut *projection {
                 p.fov = fov;
