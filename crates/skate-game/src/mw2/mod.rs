@@ -17,6 +17,7 @@ pub(crate) mod menu;
 mod grenades;
 pub(crate) mod clip;
 mod hud;
+mod look;
 mod weapons;
 
 use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
@@ -215,6 +216,7 @@ impl Plugin for Mw2Plugin {
             );
         weapons::install(app);
         grenades::install(app);
+        look::install(app);
         bots::install(app);
     }
 }
