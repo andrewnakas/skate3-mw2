@@ -1,0 +1,54 @@
+name: Web build
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+          cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.127
+      - name: Build wasm
+        run: cargo build -p skate-game --bin skate3rust --profile web --target wasm32-unknown-unknown --no-default-features
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          wasm-bindgen --target web --no-typescript --out-dir site --out-name skate3rust target/wasm32-unknown-unknown/web/skate3rust.wasm
+          cp web/* site/
+          touch site/.nojekyll
+          ls -la site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  pages:
+    if: github.ref == 'refs/heads/main'
+    needs: web
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

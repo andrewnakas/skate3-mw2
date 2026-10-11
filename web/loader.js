@@ -251,7 +251,11 @@ async function listCommunity(group, currentId) {
 // Downloads are kept in Cache Storage keyed by the content hash from pack.json,
 // so a map switch (a page reload) only downloads the new map. Entries whose
 // hash is no longer in pack.json are deleted, so a new build replaces them.
-const CACHE = 'skate3-pack';
+const CACHE = 'skate3-mw2-pack';
+// The clean-room Skate 3 pack (core.pack + maps) is published by skate3-cleanroom on the
+// same origin; this site only ships the engine. ?pack=<base url> overrides it.
+const PACK_BASE = (new URLSearchParams(location.search).get('pack') ?? '../skate3-cleanroom/').replace(/\/*$/, '/');
+const packUrls = (parts) => parts.map((part) => new URL(part, new URL(PACK_BASE, location.href)).href);
 
 async function openCache() {
   try { return await caches.open(CACHE); } catch { return null; }
@@ -386,7 +390,9 @@ async function main() {
     status('WebGPU is present but no GPU adapter is available. Check chrome://gpu or enable hardware acceleration.', true);
     return;
   }
-  const pack = await (await fetch('pack.json', { cache: 'no-cache' })).json();
+  const pack = await (await fetch(`${PACK_BASE}pack.json`, { cache: 'no-cache' })).json();
+  // pack.engine describes skate3-cleanroom's own wasm; this site loads its own build.
+  delete pack.engine;
   const params = new URLSearchParams(location.search);
   const cache = await openCache();
   const builtIn = new Set(['__test', ...pack.maps.map((m) => m.name)]);
@@ -461,8 +467,8 @@ async function main() {
     console.log(`SKATE_LAST_SESSION ${note.textContent}`);
   }
   let [core, mapBytes, wasmBytes] = await Promise.all([
-    cachedParts(cache, key('core', pack.core.hash), pack.core.parts, pack.core.size, tick),
-    map ? cachedParts(cache, key(`map-${map.name}`, map.hash), map.parts, map.size, tick)
+    cachedParts(cache, key('core', pack.core.hash), packUrls(pack.core.parts), pack.core.size, tick),
+    map ? cachedParts(cache, key(`map-${map.name}`, map.hash), packUrls(map.parts), map.size, tick)
       : external ? fetchMap(external, cache, tick, (n) => { total += n - external.size; external.size = n; }) : Promise.resolve(null),
     engine ? cachedParts(cache, key('engine', engine.hash), ['skate3rust_bg.wasm'], engine.size, tick) : Promise.resolve(null),
   ]);
