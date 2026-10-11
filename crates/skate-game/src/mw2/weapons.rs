@@ -166,6 +166,7 @@ pub(crate) struct Loadout {
     flash_until: f32,
     knife_ready: f32,
     knife_until: f32,
+    pub throw_until: f32,
 }
 
 impl Loadout {
@@ -187,6 +188,7 @@ impl Loadout {
             flash_until: 0.0,
             knife_ready: 0.0,
             knife_until: 0.0,
+            throw_until: 0.0,
         }
     }
     pub fn gun(&self) -> &Gun {
@@ -452,7 +454,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             }
         }
     }
-    let busy = busy || now < s.weapons.knife_until;
+    let busy = busy || now < s.weapons.knife_until || now < s.weapons.throw_until;
     let sprinting = s.ps.pm_flags & playerstate_iw4::pm_flags::SPRINTING != 0;
     let trigger = if gun.auto { c.fire } else { c.fire_pressed };
     if trigger && !busy && !sprinting && now >= s.weapons.ready_at {
@@ -572,6 +574,9 @@ fn animate_viewmodel(world: &mut World, s: &Session, gun: &Gun, _dt: f32) {
     }
     if s.now < w.switch_until {
         pos.y -= (w.switch_until - s.now) * 0.5;
+    }
+    if s.now < w.throw_until {
+        pos.y -= 0.15 * ((w.throw_until - s.now) / 0.5);
     }
     if s.now < w.knife_until {
         // Knife swing: the gun swipes across and forward.

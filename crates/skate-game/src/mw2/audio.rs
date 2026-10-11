@@ -65,6 +65,8 @@ pub(crate) enum Sfx {
     Hurt,
     Toggle,
     Knife,
+    Explosion,
+    Smoke,
 }
 
 #[derive(Resource)]
@@ -104,6 +106,8 @@ fn build(mut commands: Commands, mut clips: ResMut<Assets<SynthClip>>) {
         add(Sfx::Hurt, hurt()),
         add(Sfx::Toggle, tick(1400.0, 0.06, 0.35)),
         add(Sfx::Knife, whoosh()),
+        add(Sfx::Explosion, gunshot(0x6789, 1.1, 45.0, 1.0, 900.0)),
+        add(Sfx::Smoke, hiss()),
     ];
     commands.insert_resource(Sounds(sounds));
 }
@@ -211,6 +215,17 @@ fn whoosh() -> Vec<f32> {
             let t = i as f32 / n as f32;
             lp += (0.05 + 0.25 * t) * (noise.next() - lp);
             lp * (t * std::f32::consts::PI).sin() * 0.9
+        })
+        .collect()
+}
+
+fn hiss() -> Vec<f32> {
+    let mut noise = Noise(0x5a17);
+    let n = samples(1.5);
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / n as f32;
+            noise.next() * 0.25 * (1.0 - t) * (t * 20.0).min(1.0)
         })
         .collect()
 }

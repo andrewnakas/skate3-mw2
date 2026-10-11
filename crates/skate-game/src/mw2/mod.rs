@@ -12,6 +12,7 @@
 
 pub(crate) mod audio;
 mod bots;
+mod grenades;
 pub(crate) mod clip;
 mod hud;
 mod weapons;
@@ -74,6 +75,9 @@ pub(crate) struct Controls {
     pub weapon_slot: Option<usize>,
     pub knife: bool,
     pub streak_key: bool,
+    pub frag: bool,
+    pub smoke: bool,
+    pub scores: bool,
 }
 
 #[derive(Resource)]
@@ -110,6 +114,10 @@ pub(crate) struct Session {
     pub popups: Vec<(String, f32)>,
     pub uav_ready: bool,
     pub uav_until: f32,
+    pub grenades: grenades::Grenades,
+    /// Pad stance (B): tap toggles crouch, hold goes prone. 0 stand, 1 crouch, 2 prone.
+    pad_stance: u8,
+    pad_b_down: Option<f32>,
 }
 
 impl Session {
@@ -194,6 +202,7 @@ impl Plugin for Mw2Plugin {
                     .before(crate::camera::present),
             );
         weapons::install(app);
+        grenades::install(app);
         bots::install(app);
     }
 }
@@ -283,6 +292,7 @@ fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
     let keys = world.resource::<ButtonInput<KeyCode>>();
     let mouse = world.resource::<ButtonInput<MouseButton>>();
     let motion = world.resource::<AccumulatedMouseMotion>().delta;
+    let wheel = world.resource::<bevy::input::mouse::AccumulatedMouseScroll>().delta.y;
     let axis = |neg: KeyCode, pos: KeyCode| f32::from(i8::from(keys.pressed(pos)) - i8::from(keys.pressed(neg)));
     let mut c = Controls {
         forward: axis(KeyCode::KeyS, KeyCode::KeyW),
@@ -292,21 +302,25 @@ fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
         fire: mouse.pressed(MouseButton::Left),
         ads: mouse.pressed(MouseButton::Right),
         jump: keys.pressed(KeyCode::Space),
-        crouch: keys.pressed(KeyCode::KeyC) || keys.pressed(KeyCode::ControlLeft),
-        prone: keys.pressed(KeyCode::KeyZ),
+        crouch: keys.pressed(KeyCode::KeyC),
+        prone: keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight),
         sprint: keys.pressed(KeyCode::ShiftLeft),
         reload: keys.just_pressed(KeyCode::KeyR),
-        next_weapon: keys.just_pressed(KeyCode::KeyQ),
+        next_weapon: mouse.just_pressed(MouseButton::Middle) || wheel.abs() > 0.0,
         weapon_slot: [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3]
             .iter()
             .position(|k| keys.just_pressed(*k)),
-        knife: keys.just_pressed(KeyCode::KeyE) || keys.just_pressed(KeyCode::KeyV),
+        knife: keys.just_pressed(KeyCode::KeyV),
         streak_key: keys.just_pressed(KeyCode::Digit4),
+        frag: keys.just_pressed(KeyCode::KeyF),
+        smoke: keys.just_pressed(KeyCode::KeyG),
+        scores: keys.pressed(KeyCode::Tab),
         ..default()
     };
     let toggle = keys.just_pressed(KeyCode::KeyJ);
     let dt = world.resource::<Time>().delta_secs();
     let mut pad_toggle = false;
+    let mut pad_b: Option<bool> = None;
     let mut pads = world.query::<&Gamepad>();
     for pad in pads.iter(world) {
         let get = |a: GamepadAxis| pad.get(a).unwrap_or(0.0);
@@ -323,7 +337,10 @@ fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
         c.fire |= analog(GamepadButton::RightTrigger2) > 0.3;
         c.ads |= analog(GamepadButton::LeftTrigger2) > 0.3;
         c.jump |= pad.pressed(GamepadButton::South);
-        c.crouch |= pad.pressed(GamepadButton::East);
+        pad_b = pad_b.or(Some(pad.pressed(GamepadButton::East)).filter(|b| *b));
+        c.frag |= pad.just_pressed(GamepadButton::RightTrigger);
+        c.smoke |= pad.just_pressed(GamepadButton::LeftTrigger);
+        c.scores |= pad.pressed(GamepadButton::Select);
         c.sprint |= pad.pressed(GamepadButton::LeftThumb);
         c.reload |= pad.just_pressed(GamepadButton::West);
         c.next_weapon |= pad.just_pressed(GamepadButton::North);
@@ -335,6 +352,23 @@ fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
         }
     }
     c.fire_pressed = c.fire && !previous_fire;
+    // Pad B is MW2's +stance: tap toggles crouch, hold goes prone.
+    let now = world.resource::<Time>().elapsed_secs();
+    if let Some(mut s) = world.get_resource_mut::<Session>() {
+        match (pad_b.is_some(), s.pad_b_down) {
+            (true, None) => s.pad_b_down = Some(now),
+            (true, Some(at)) if now - at > 0.4 && s.pad_stance != 2 => s.pad_stance = 2,
+            (false, Some(at)) => {
+                if now - at <= 0.4 {
+                    s.pad_stance = if s.pad_stance == 0 { 1 } else { 0 };
+                }
+                s.pad_b_down = None;
+            }
+            _ => {}
+        }
+        c.crouch |= s.pad_stance == 1;
+        c.prone |= s.pad_stance == 2;
+    }
     (c, toggle || pad_toggle)
 }
 
@@ -495,6 +529,13 @@ fn enter(world: &mut World, boot: bool) {
             popups: Vec::new(),
             uav_ready: false,
             uav_until: 0.0,
+            grenades: {
+                let mut g = grenades::Grenades::default();
+                g.refill();
+                g
+            },
+            pad_stance: 0,
+            pad_b_down: None,
         });
     } else {
         let mut s = world.resource_mut::<Session>();
@@ -536,6 +577,7 @@ fn ride(world: &mut World) {
         s.controls = Controls::default();
         s.ps.origin = to_iw(feet);
         common_tick(world, &mut s, dt);
+        grenades::tick(world, &mut s, dt);
         bots::tick(world, &mut s, dt);
         s.dead_until.is_some()
     });
@@ -711,7 +753,14 @@ fn run(world: &mut World) {
             play(world, Sfx::Toggle, 0.8);
         }
 
+        if c.frag {
+            grenades::throw(world, &mut s, grenades::Kind::Frag);
+        }
+        if c.smoke {
+            grenades::throw(world, &mut s, grenades::Kind::Smoke);
+        }
         weapons::tick(world, &mut s, dt);
+        grenades::tick(world, &mut s, dt);
         bots::tick(world, &mut s, dt);
 
         if (now / 2.0).floor() != ((now - dt) / 2.0).floor() {
@@ -743,6 +792,8 @@ fn respawn(s: &mut Session) {
     s.dead_until = None;
     s.protected_until = s.now + 4.0;
     s.weapons.refill();
+    s.grenades.refill();
+    s.pad_stance = 0;
 }
 
 /// Take damage from a bot; returns true if this killed the player.

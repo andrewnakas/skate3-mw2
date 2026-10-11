@@ -23,6 +23,8 @@ pub(crate) struct Bot {
     pub name: &'static str,
     /// When this bot last fired (red dot on the minimap, as in MW2).
     pub last_shot: f32,
+    pub kills: u32,
+    pub deaths: u32,
     pub yaw: f32,
     health: f32,
     respawn_at: f32,
@@ -142,6 +144,8 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
                 alive: false,
                 name: *name,
                 last_shot: -100.0,
+                kills: 0,
+                deaths: 0,
                 yaw: 0.0,
                 health: 0.0,
                 respawn_at: now + 0.5 + s.bots.len() as f32 * 0.7,
@@ -203,7 +207,8 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
         };
         let alerted = now < bot.alert_until;
         let visible = player_alive && dist < 6000.0 && (facing || alerted || bot.engaged)
-            && clip.ray(eye, player_eye).is_none();
+            && clip.ray(eye, player_eye).is_none()
+            && !super::grenades::smoke_blocks(&s.grenades, now, eye, player_eye);
         bot.engaged = visible && (bot.engaged || engaged_others < MAX_ENGAGED);
         if bot.engaged {
             bot.seen_since.get_or_insert(now);
@@ -315,7 +320,9 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             spawn_tracer(world, from_iw(from), from_iw(target), now);
             if hit {
                 world.resource_scope(|world, sounds: Mut<Sounds>| sounds.play(&mut world.commands(), Sfx::Hurt, 0.6));
-                super::hurt(s, damage, name);
+                if super::hurt(s, damage, name) {
+                    s.bots[i].kills += 1;
+                }
             }
         }
         update_body(world, &s.bots[i], now);
@@ -441,6 +448,7 @@ pub(crate) fn damage(s: &mut Session, i: usize, amount: f32, weapon: &str, head:
         return false;
     }
     bot.alive = false;
+    bot.deaths += 1;
     bot.died_at = now;
     bot.respawn_at = now + 4.0;
     let name = bot.name;

@@ -26,6 +26,7 @@ pub(crate) enum Part {
     Hint,
     Minimap,
     Dot(u8),
+    Scores,
 }
 
 impl Part {
@@ -125,6 +126,18 @@ pub(crate) fn spawn(mut commands: Commands) {
             root.spawn(text(Part::Score, 18.0, white, Node { left: Val::Percent(50.0), top: Val::Px(14.0), margin: UiRect { left: Val::Px(-200.0), ..default() }, width: Val::Px(400.0), justify_content: JustifyContent::Center, ..abs() }));
             root.spawn(text(Part::Feed, 15.0, white, Node { left: Val::Px(20.0), bottom: Val::Px(140.0), ..abs() }));
             root.spawn(text(Part::Center, 30.0, white, Node { left: Val::Percent(50.0), top: Val::Percent(38.0), margin: UiRect { left: Val::Px(-150.0), ..default() }, width: Val::Px(300.0), ..abs() }));
+            root.spawn((
+                text(Part::Scores, 17.0, white, Node {
+                    left: Val::Percent(50.0),
+                    top: Val::Percent(22.0),
+                    margin: UiRect { left: Val::Px(-210.0), ..default() },
+                    width: Val::Px(420.0),
+                    padding: UiRect::all(Val::Px(14.0)),
+                    ..abs()
+                }),
+                BackgroundColor(Color::srgba(0.02, 0.03, 0.03, 0.82)),
+                Visibility::Hidden,
+            ));
             root.spawn(text(Part::Hint, 13.0, white, Node { left: Val::Px(20.0), bottom: Val::Px(46.0), ..abs() }));
         });
 }
@@ -259,11 +272,25 @@ pub(crate) fn update(
                     t.0 = if dead { "KILLED\nrespawning...".into() } else { String::new() };
                 }
             }
+            Part::Scores => {
+                let show = s.controls.scores || s.match_over_until.is_some();
+                *vis = if show { Visibility::Inherited } else { Visibility::Hidden };
+                if let Some(mut t) = text {
+                    let mut rows = vec![("You".to_string(), s.kills, s.deaths, s.score)];
+                    rows.extend(s.bots.iter().map(|b| (b.name.to_string(), b.kills, b.deaths, b.kills * 100)));
+                    rows.sort_by(|a, b| b.3.cmp(&a.3));
+                    let mut out = format!("{:<14}{:>8}{:>7}{:>7}\n", "", "Score", "Kills", "Deaths");
+                    for (name, k, d, sc) in rows {
+                        out += &format!("{name:<14}{sc:>8}{k:>7}{d:>7}\n");
+                    }
+                    t.0 = out;
+                }
+            }
             Part::Hint => {
                 if let Some(mut t) = text {
                     let streak = if s.uav_ready { "  |  4: UAV ready" } else { "" };
                     t.0 = if on_foot {
-                        format!("J board | 1-3 Q guns | R reload | E knife | Shift sprint C crouch{streak}")
+                        format!("J board | wheel/1-3 guns | R reload | V knife | F frag G smoke | Tab scores{streak}")
                     } else {
                         format!("J back on foot | the bots are still hunting you{streak}")
                     };
