@@ -34,6 +34,7 @@ mod map_render;
 mod map_transition;
 mod modding;
 mod multiplayer;
+mod mw2;
 mod performance;
 mod physics;
 mod presentation;

@@ -157,6 +157,7 @@ pub(crate) fn build(
     app.add_plugins(crate::modding::ModdingPlugin);
     app.add_plugins(crate::skate_audio::SkateAudioPlugin);
     crate::teleport_menu::install(&mut app);
+    app.add_plugins(crate::mw2::Mw2Plugin);
     app.add_plugins(crate::updater::UpdaterPlugin);
     #[cfg(target_arch = "wasm32")]
     if crate::web::lite() {

@@ -73,6 +73,7 @@ pub(crate) struct VehicleCameraBlend {
 
 pub(crate) fn present(
     vehicles: Res<crate::modding::vehicles::Vehicles>,
+    mw2: Res<crate::mw2::Mw2>,
     mut runtime: ResMut<CameraRuntime>,
     windows: Query<&Window>,
     history: Res<crate::presentation::Presentation>,
@@ -144,6 +145,12 @@ pub(crate) fn present(
         // Vehicle motion is already interpolated with the rider/chassis. A separate
         // follow filter introduces relative motion and makes fixed ticks visible.
         vehicle_blend.previous = Some(*transform);
+        if let Some((eye, fov)) = mw2.camera.filter(|_| mw2.active) {
+            *transform = eye;
+            if let Projection::Perspective(p) = &mut *projection {
+                p.fov = fov;
+            }
+        }
         camera.is_active = true;
     }
 }

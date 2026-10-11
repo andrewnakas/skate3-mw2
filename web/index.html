@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Skate 3">
+<meta name="apple-mobile-web-app-title" content="Skate 3 x MW2">
 <link rel="manifest" href="manifest.webmanifest">
-<title>Skate 3 Rust Engine</title>
+<title>Skate 3 x MW2 (clean room)</title>
 <style>
   :root { color-scheme: dark; --bg: #0b0f14; --fg: #e6edf3; --muted: #8b98a5; --accent: #3fb6c4; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
@@ -55,10 +55,15 @@
 <div id="hint"></div>
 <div id="toast"></div>
 <div id="overlay"><div id="panel">
-  <h1>Skate 3 Rust Engine</h1>
+  <h1>Skate 3 x MW2</h1>
   <div id="status">Starting...</div>
   <div class="bar"><div id="progress"></div></div>
-  <div id="help">Keyboard = Xbox pad: WASD left stick, arrows right stick, Space A, E B,
+  <div id="help"><b>Press J (or click both sticks) to switch between skating and MW2.</b>
+    MW2 mode: WASD move, mouse aim (click to lock), left click fire, right click ADS, Space jump, C crouch, Z prone,
+    Shift sprint, R reload, 1-4 or Q guns (ACR, UMP45, Intervention, SPAS-12). Pad: sticks, RT fire, LT aim, A jump, B crouch, X reload, Y swap.<br>
+    Movement is IW4L's Rust rewrite of MW2's player movement (Apache-2.0); guns use published MW2 numbers;
+    every model is boxes and every gun sound is synthesised. No game files.<br>
+    Skating: keyboard = Xbox pad: WASD left stick, arrows right stick, Space A, E B,
     Shift X, F Y, Z/C triggers, Q/R bumpers, Enter Start. Gamepads work directly.<br>
     Freestyle MX bike: F9 spawns it, E gets on/off, C throttle, Z brake, V clutch, hold Q/R + arrows for tricks.<br>
     Phones/tablets: on-screen pad (Bike = F9, Y gets on, RT throttle, hold LB/RB + right stick for tricks).<br>
