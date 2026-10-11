@@ -11,6 +11,8 @@ Input directory:
      "spawn": [x, y, z], "heading": 0.0,
      "environment": [45 floats]            # optional; defaults to a clear day
      "materials": [{"name": "...", "texture": "textures/x.png" | null,
+                    "normal": "textures/x_n.png" | null,       # optional PBR maps
+                    "orm": "textures/x_orm.png" | null,
                     "color": [r, g, b], "roughness": 0.9,
                     "friction": 0.6, "restitution": 0.1,
                     "alpha_mode": 0, "alpha_cutoff": 0.5,      # 0 opaque, 1 mask, 2 blend
@@ -18,6 +20,16 @@ Input directory:
      "lights": [{"name", "kind", "position", "direction", "color",
                  "intensity", "range", "radius", "inner_cos", "outer_cos"}],
      "rails": [{"name", "closed", "points": [[x, y, z], ...]}]}
+
+  Albedo textures are stored as sRGB (colour space 1). Normal and ORM maps are
+  stored linear (colour space 0); the engine (crates/skate-game/src/skate_world.rs)
+  samples them as Bevy StandardMaterial maps with repeat addressing:
+    normal  tangent-space, OpenGL / +Y convention (flip_normal_map_y off),
+            tangents generated from the UVs (mikktspace) since SKATE09 has none;
+    orm     R occlusion, G roughness, B metalness (glTF). With an ORM map the
+            engine sets metallic = 1 and multiplies G by "roughness", so give
+            ORM materials "roughness": 1.0 and put the metalness in B.
+  Paths are shared: materials naming the same file share one embedded texture.
 
   render.npz     positions (N,3) f32, normals (N,3) f32, uv (N,2) f32,
                  material (N,) u32 (1-based), indices (M,) u32;
@@ -104,13 +116,18 @@ def write(src, dst):
     for name, a in (("positions", positions), ("normals", normals), ("uv", uv), ("collision", tris)):
         assert np.isfinite(a).all(), f"{name} has non-finite values"
 
-    # Textures: one per material that names a file, deduplicated by path.
-    textures, tex_ids = [], {}
+    # Textures: one per file a material names, deduplicated by path.
+    # Colour space: 1 sRGB for albedo, 0 linear for normal / ORM data.
+    textures, tex_ids, space = [], {}, {}
     for m in materials:
-        path = m.get("texture")
-        if path and path not in tex_ids:
-            textures.append(path)
-            tex_ids[path] = len(textures)
+        for role, cs in (("texture", 1), ("normal", 0), ("orm", 0)):
+            path = m.get(role)
+            if not path:
+                continue
+            assert space.setdefault(path, cs) == cs, f"{path} used as both colour and data"
+            if path not in tex_ids:
+                textures.append(path)
+                tex_ids[path] = len(textures)
 
     o = Out()
     o.b += b"SKATE%02d\0" % VERSION
@@ -133,7 +150,7 @@ def write(src, dst):
         o.f(m.get("roughness", 0.9), m.get("emissive", 0.0))
         o.u(tex_ids.get(m.get("texture"), 0), 0)       # albedo, indirect lightmap
         o.f(m.get("indirect_strength", 1.0))
-        o.u(0, 0, 0)                                    # normal, ORM, emissive maps
+        o.u(tex_ids.get(m.get("normal"), 0), tex_ids.get(m.get("orm"), 0), 0)   # normal, ORM, emissive maps
         o.u(m.get("alpha_mode", 0))
         o.f(m.get("alpha_cutoff", 0.5))
         o.u(m.get("audio", 3), m.get("physics", 1), m.get("pattern", 0))
@@ -141,7 +158,7 @@ def write(src, dst):
     for path in textures:
         w, h, rgba = load_rgba(src / path)
         o.s(pathlib.Path(path).stem)
-        o.u(w, h, 1)                                    # colour space 1: sRGB albedo
+        o.u(w, h, space[path])                          # colour space: 1 sRGB albedo, 0 linear data
         o.stored(rgba)
 
     vertex = np.zeros(n, dtype=[("p", "<f4", 3), ("n", "<f4", 3), ("uv", "<f4", 2), ("lm", "<f4", 2), ("m", "<u4")])
@@ -170,7 +187,8 @@ def write(src, dst):
             l.get("inner_cos", 1.0), l.get("outer_cos", 0.0))
 
     pathlib.Path(dst).write_bytes(o.b)
-    print(f"Wrote {dst}: {len(materials)} materials, {len(textures)} textures, "
+    pbr = sum(1 for m in materials if m.get("normal") or m.get("orm"))
+    print(f"Wrote {dst}: {len(materials)} materials ({pbr} with normal/ORM maps), {len(textures)} textures, "
           f"{n} vertices, {len(indices) // 3} triangles, {len(tris)} collision, {len(o.b)} bytes")
 
 
@@ -182,6 +200,16 @@ def demo(dst):
     checker = np.indices((64, 64)).sum(axis=0) // 8 % 2
     rgb = np.where(checker[..., None] == 1, [196, 170, 120], [150, 128, 90]).astype(np.uint8)
     Image.fromarray(rgb, "RGB").save(dst / "textures" / "sand.png")
+    # A tangent-space normal map (OpenGL +Y) of soft round bumps, one per checker cell,
+    # and an ORM map (occlusion in the dips, rough, not metal).
+    y, x = (np.indices((64, 64)) % 16 + 0.5) / 16 * 2 - 1
+    h = np.clip(1 - (x * x + y * y), 0, None)
+    nx, ny = 2.0 * x * (h > 0), -2.0 * y * (h > 0)          # -dh/dx, -dh/dy (image y points down)
+    nrm_map = np.dstack([nx, ny, np.ones_like(nx)])
+    nrm_map /= np.linalg.norm(nrm_map, axis=-1, keepdims=True)
+    Image.fromarray(np.uint8(np.rint((nrm_map * 0.5 + 0.5) * 255)), "RGB").save(dst / "textures" / "sand_n.png")
+    orm_map = np.dstack([np.uint8(255 - 60 * (1 - h)), np.full((64, 64), 230, np.uint8), np.zeros((64, 64), np.uint8)])
+    Image.fromarray(orm_map, "RGB").save(dst / "textures" / "sand_orm.png")
     quads = [
         [(-20, 0, -20), (-20, 0, 20), (20, 0, 20), (20, 0, -20)],
         [(-2, 1, -2), (-2, 1, 2), (2, 1, 2), (2, 1, -2)],
@@ -201,7 +229,8 @@ def demo(dst):
     (dst / "map.json").write_text(json.dumps({
         "name": "Mesh writer demo",
         "spawn": [0, 0, 6], "heading": 0,
-        "materials": [{"name": "Sand", "texture": "textures/sand.png"}],
+        "materials": [{"name": "Sand", "texture": "textures/sand.png", "normal": "textures/sand_n.png",
+                       "orm": "textures/sand_orm.png", "roughness": 1.0}],
         "rails": [{"name": "Box edge", "points": [[-2, 1, 2], [2, 1, 2]]}],
     }, indent=1))
     print(f"Wrote demo input to {dst}")
