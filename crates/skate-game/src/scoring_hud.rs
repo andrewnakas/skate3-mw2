@@ -199,6 +199,7 @@ fn setup(
             ));
             hud.composite = composites.add(HudComposite { image: target });
             commands.spawn((
+                crate::mw2::SkateOnly,
                 MaterialNode(hud.composite.clone()),
                 UiTargetCamera(output),
                 GlobalZIndex(1),

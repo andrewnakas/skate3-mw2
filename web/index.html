@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Skate 3 x MW2">
+<meta name="apple-mobile-web-app-title" content="MW2 x Skate">
 <link rel="manifest" href="manifest.webmanifest">
-<title>Skate 3 x MW2 (clean room)</title>
+<title>MW2 x Skate (clean room)</title>
 <style>
   :root { color-scheme: dark; --bg: #0b0f14; --fg: #e6edf3; --muted: #8b98a5; --accent: #3fb6c4; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
@@ -41,6 +41,8 @@
   #mapcredit { color: var(--muted); text-decoration: none; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #mapcredit[href]:hover { color: var(--accent); }
   select { max-width: 60vw; background: #1c2530; color: var(--fg); border: 1px solid #2d3a47; border-radius: 4px; padding: 2px 4px; }
+  #clicktoplay { position: fixed; left: 50%; top: 58%; transform: translateX(-50%); z-index: 4; pointer-events: none;
+    background: #0b0f14cc; border: 1px solid #3fb6c4; border-radius: 6px; padding: 8px 16px; font-size: 15px; letter-spacing: .04em; }
   #help { color: var(--muted); font-size: 12px; margin-top: 12px; }
 </style>
 </head>
@@ -54,16 +56,18 @@
   <button id="fullscreen" type="button" title="Fullscreen (F11 also works)">Fullscreen</button></div>
 <div id="hint"></div>
 <div id="toast"></div>
+<div id="clicktoplay" hidden>Click to play</div>
 <div id="overlay"><div id="panel">
-  <h1>Skate 3 x MW2</h1>
+  <h1>MW2 x Skate</h1>
   <div id="status">Starting...</div>
   <div class="bar"><div id="progress"></div></div>
-  <div id="help"><b>Press J (or click both sticks) to switch between skating and MW2.</b>
-    MW2 mode: WASD move, mouse aim (click to lock), left click fire, right click ADS, Space jump, C crouch, Z prone,
-    Shift sprint, R reload, 1-4 or Q guns (ACR, UMP45, Intervention, SPAS-12). Pad: sticks, RT fire, LT aim, A jump, B crouch, X reload, Y swap.<br>
+  <div id="help"><b>A Modern Warfare 2 match on a skate park. Press J to drop onto a board, J again to fight on foot.</b><br>
+    WASD move, mouse aim (click to lock), left click fire, right click aim down sights, Space jump, C crouch, Z prone,
+    Shift sprint, E knife, R reload, 1-3 or Q guns (ACR, UMP45, Intervention, SPAS-12), 4 UAV after a 3-kill streak.
+    Pad: sticks, RT fire, LT aim, A jump, B crouch, X reload, Y swap, R3 knife, d-pad right UAV, both sticks: board.<br>
     Movement is IW4L's Rust rewrite of MW2's player movement (Apache-2.0); guns use published MW2 numbers;
     every model is boxes and every gun sound is synthesised. No game files.<br>
-    Skating: keyboard = Xbox pad: WASD left stick, arrows right stick, Space A, E B,
+    On the board, keyboard = Xbox pad: WASD left stick, arrows right stick, Space A, E B,
     Shift X, F Y, Z/C triggers, Q/R bumpers, Enter Start. Gamepads work directly.<br>
     Freestyle MX bike: F9 spawns it, E gets on/off, C throttle, Z brake, V clutch, hold Q/R + arrows for tricks.<br>
     Phones/tablets: on-screen pad (Bike = F9, Y gets on, RT throttle, hold LB/RB + right stick for tricks).<br>

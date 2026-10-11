@@ -1,12 +1,14 @@
-//! MW2 mode: step off the board and play Modern Warfare 2 on the skate map.
+//! MW2 with a skateboard: the game boots into a Modern Warfare 2 match on
+//! the map, and J (or both sticks) drops the player onto a Skate 3 board.
+//! The match keeps running while skating: bots hunt the board, and getting
+//! killed puts the player back on foot.
 //!
-//! The player moves with IW4L's own IW4 movement (`movement_iw4::pmove`:
+//! On foot the player moves with IW4L's own IW4 movement (`movement_iw4::pmove`:
 //! walk, sprint, jump, crouch, prone, mantle, slide-move and step-up), traced
 //! against the map's skate collision triangles through [`clip`]. Guns use
 //! published MW2 numbers; every model is built from primitives and every
 //! sound is synthesised, so nothing here comes from a retail game.
 //!
-//! Press J (or click both sticks) to switch between skating and MW2.
 
 pub(crate) mod audio;
 mod bots;
@@ -40,7 +42,19 @@ pub(crate) struct Mw2 {
     pub(crate) active: bool,
     /// Eye pose and vertical field of view, written before `camera::present`.
     pub(crate) camera: Option<(Transform, f32)>,
+    /// The match has started (the first spawn happened).
+    pub(crate) booted: bool,
+    boot_frames: u32,
 }
+
+/// UI that belongs to skating (the original scoring HUD, mod overlays):
+/// hidden while on foot.
+#[derive(Component)]
+pub(crate) struct SkateOnly;
+
+/// A match: first to the score limit, or the most when time runs out.
+pub(crate) const MATCH_SECONDS: f32 = 600.0;
+pub(crate) const SCORE_LIMIT: u32 = 3000;
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct Controls {
@@ -58,6 +72,8 @@ pub(crate) struct Controls {
     pub reload: bool,
     pub next_weapon: bool,
     pub weapon_slot: Option<usize>,
+    pub knife: bool,
+    pub streak_key: bool,
 }
 
 #[derive(Resource)]
@@ -87,6 +103,13 @@ pub(crate) struct Session {
     pub bots: Vec<bots::Bot>,
     pub controls: Controls,
     pub now: f32,
+    pub score: u32,
+    pub match_end: f32,
+    pub match_over_until: Option<f32>,
+    /// Centre-screen points popups ("+100").
+    pub popups: Vec<(String, f32)>,
+    pub uav_ready: bool,
+    pub uav_until: f32,
 }
 
 impl Session {
@@ -107,6 +130,13 @@ impl Session {
         let pitch = (self.pitch + self.weapons.recoil.x).to_radians();
         let yaw = (self.yaw + self.weapons.recoil.y).to_radians();
         [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()]
+    }
+
+    pub fn popup(&mut self, text: String) {
+        self.popups.push((text, self.now));
+        if self.popups.len() > 3 {
+            self.popups.remove(0);
+        }
     }
 
     pub fn feed(&mut self, line: String) {
@@ -154,7 +184,12 @@ impl Plugin for Mw2Plugin {
             .add_systems(Startup, hud::spawn)
             .add_systems(
                 Update,
-                (toggle, run.run_if(|m: Res<Mw2>| m.active), hud::update)
+                (
+                    toggle,
+                    run.run_if(|m: Res<Mw2>| m.active),
+                    ride.run_if(|m: Res<Mw2>| m.booted && !m.active),
+                    hud::update,
+                )
                     .chain()
                     .before(crate::camera::present),
             );
@@ -262,9 +297,11 @@ fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
         sprint: keys.pressed(KeyCode::ShiftLeft),
         reload: keys.just_pressed(KeyCode::KeyR),
         next_weapon: keys.just_pressed(KeyCode::KeyQ),
-        weapon_slot: [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4]
+        weapon_slot: [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3]
             .iter()
             .position(|k| keys.just_pressed(*k)),
+        knife: keys.just_pressed(KeyCode::KeyE) || keys.just_pressed(KeyCode::KeyV),
+        streak_key: keys.just_pressed(KeyCode::Digit4),
         ..default()
     };
     let toggle = keys.just_pressed(KeyCode::KeyJ);
@@ -290,6 +327,8 @@ fn read_controls(world: &mut World, previous_fire: bool) -> (Controls, bool) {
         c.sprint |= pad.pressed(GamepadButton::LeftThumb);
         c.reload |= pad.just_pressed(GamepadButton::West);
         c.next_weapon |= pad.just_pressed(GamepadButton::North);
+        c.knife |= pad.just_pressed(GamepadButton::RightThumb) && !pad.pressed(GamepadButton::LeftThumb);
+        c.streak_key |= pad.just_pressed(GamepadButton::DPadRight);
         let both = pad.pressed(GamepadButton::LeftThumb) && pad.pressed(GamepadButton::RightThumb);
         if both && (pad.just_pressed(GamepadButton::LeftThumb) || pad.just_pressed(GamepadButton::RightThumb)) {
             pad_toggle = true;
@@ -316,6 +355,11 @@ fn set_cursor(world: &mut World, locked: bool) {
 fn toggle(world: &mut World) {
     let previous_fire = world.get_resource::<Session>().is_some_and(|s| s.controls.fire);
     let (controls, toggle) = read_controls(world, previous_fire);
+    publish_on_foot(world);
+    if !world.resource::<Mw2>().booted {
+        boot(world);
+        return;
+    }
     let active = world.resource::<Mw2>().active;
     if active {
         if let Some(mut s) = world.get_resource_mut::<Session>() {
@@ -332,11 +376,43 @@ fn toggle(world: &mut World) {
     if active {
         exit(world);
     } else {
-        enter(world);
+        enter(world, false);
     }
 }
 
-fn enter(world: &mut World) {
+/// Tell the page whether the player is on foot (it shows "click to play"
+/// while the pointer is not locked).
+fn publish_on_foot(world: &World) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let on_foot = world.resource::<Mw2>().active;
+        let _ = js_sys::Reflect::set(&js_sys::global(), &"MW2_ON_FOOT".into(), &on_foot.into());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = world;
+}
+
+/// Start the match on foot once the world, skater and physics are ready.
+fn boot(world: &mut World) {
+    let ready = world.get_resource::<crate::animation::AnimationStatus>().is_some_and(|a| a.ready)
+        && world.get_resource::<crate::physics::GamePhysics>().is_some_and(|p| !p.world_triangles().is_empty());
+    let mut mw2 = world.resource_mut::<Mw2>();
+    if !ready {
+        mw2.boot_frames = 0;
+        return;
+    }
+    mw2.boot_frames += 1;
+    // A few frames for the spawn teleport to settle.
+    if mw2.boot_frames < 30 {
+        return;
+    }
+    enter(world, true);
+    if world.resource::<Mw2>().active {
+        world.resource_mut::<Mw2>().booted = true;
+    }
+}
+
+fn enter(world: &mut World, boot: bool) {
     if world.resource::<crate::modding::vehicles::Vehicles>().occupied()
         || world.resource::<crate::replay::Replay>().active
         || world.resource::<crate::map_transition::MapTransition>().busy()
@@ -413,6 +489,12 @@ fn enter(world: &mut World) {
             bots: Vec::new(),
             controls: Controls::default(),
             now,
+            score: 0,
+            match_end: now + MATCH_SECONDS,
+            match_over_until: None,
+            popups: Vec::new(),
+            uav_ready: false,
+            uav_until: 0.0,
         });
     } else {
         let mut s = world.resource_mut::<Session>();
@@ -423,15 +505,80 @@ fn enter(world: &mut World) {
         s.now = now;
         s.protected_until = now + 3.0;
     }
+    if boot {
+        // Deploy at a spawn point, not where the skater happened to start.
+        let mut s = world.resource_mut::<Session>();
+        let from = s.ps.origin;
+        if let Some(spot) = s.spawn_spot(from, 0.0, 1e9) {
+            s.ps = spawn_player_state(spot, yaw);
+        }
+        s.match_end = now + MATCH_SECONDS;
+        s.feed("Kill the bots. J drops you onto a board.".into());
+    }
     world.resource_mut::<Mw2>().active = true;
     set_cursor(world, true);
     bots::show(world, true);
     weapons::show(world, true);
-    let mut s = world.resource_mut::<Session>();
-    s.feed("MW2 mode: WASD move, mouse aim, click fire, right-click ADS, J to skate".into());
     world.resource_scope(|world, sounds: Mut<Sounds>| {
         sounds.play(&mut world.commands(), Sfx::Toggle, 0.6);
     });
+}
+
+/// Skating: the match goes on. The player is wherever the skater is; bots
+/// hunt the board, and getting killed puts the player back on foot.
+fn ride(world: &mut World) {
+    let dt = world.resource::<Time>().delta_secs().min(0.1);
+    let now = world.resource::<Time>().elapsed_secs();
+    let m = world.resource::<crate::physics::SkaterRuntime>().animated_skeleton.roots.animation_to_world;
+    let feet = Vec3::new(m[3][0], m[3][1], m[3][2]);
+    let killed = world.resource_scope(|world, mut s: Mut<Session>| {
+        s.now = now;
+        s.controls = Controls::default();
+        s.ps.origin = to_iw(feet);
+        common_tick(world, &mut s, dt);
+        bots::tick(world, &mut s, dt);
+        s.dead_until.is_some()
+    });
+    if killed {
+        enter(world, false);
+    }
+}
+
+/// Health regen, timers, popups and the match clock, on foot or on the board.
+fn common_tick(world: &mut World, s: &mut Session, dt: f32) {
+    let now = s.now;
+    if s.dead_until.is_none() && now - s.last_hurt > 4.0 {
+        s.health = (s.health + 50.0 * dt).min(100.0);
+    }
+    s.hurt_flash = (s.hurt_flash - dt * 2.0).max(0.0);
+    s.feed.retain(|(_, at)| now - at < 6.0);
+    s.popups.retain(|(_, at)| now - at < 1.4);
+    match s.match_over_until {
+        Some(until) if now >= until => {
+            // Next match.
+            s.score = 0;
+            s.kills = 0;
+            s.deaths = 0;
+            s.streak = 0;
+            s.uav_ready = false;
+            s.match_end = now + MATCH_SECONDS;
+            s.match_over_until = None;
+            s.protected_until = now + 3.0;
+            s.feed("New match".into());
+        }
+        None if s.score >= SCORE_LIMIT || now >= s.match_end => {
+            let won = s.score >= SCORE_LIMIT;
+            s.match_over_until = Some(now + 8.0);
+            s.popup(if won { "VICTORY".into() } else { "TIME UP".into() });
+            s.feed(format!("Match over: {} points, {} kills, {} deaths", s.score, s.kills, s.deaths));
+            play(world, Sfx::Kill, 0.8);
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn play(world: &mut World, sfx: Sfx, gain: f32) {
+    world.resource_scope(|world, sounds: Mut<Sounds>| sounds.play(&mut world.commands(), sfx, gain));
 }
 
 fn exit(world: &mut World) {
@@ -556,12 +703,13 @@ fn run(world: &mut World) {
             }
         }
 
-        // MW2 regen: a few seconds without damage, then health refills.
-        if !dead && now - s.last_hurt > 4.0 {
-            s.health = (s.health + 50.0 * dt).min(100.0);
+        common_tick(world, &mut s, dt);
+        if c.streak_key && s.uav_ready {
+            s.uav_ready = false;
+            s.uav_until = now + 30.0;
+            s.feed("UAV online".into());
+            play(world, Sfx::Toggle, 0.8);
         }
-        s.hurt_flash = (s.hurt_flash - dt * 2.0).max(0.0);
-        s.feed.retain(|(_, at)| now - at < 6.0);
 
         weapons::tick(world, &mut s, dt);
         bots::tick(world, &mut s, dt);

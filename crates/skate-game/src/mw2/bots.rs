@@ -21,7 +21,9 @@ pub(crate) struct Bot {
     pub ps: PlayerState,
     pub alive: bool,
     pub name: &'static str,
-    yaw: f32,
+    /// When this bot last fired (red dot on the minimap, as in MW2).
+    pub last_shot: f32,
+    pub yaw: f32,
     health: f32,
     respawn_at: f32,
     died_at: f32,
@@ -139,6 +141,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
                 ps: PlayerState::ZERO,
                 alive: false,
                 name: *name,
+                last_shot: -100.0,
                 yaw: 0.0,
                 health: 0.0,
                 respawn_at: now + 0.5 + s.bots.len() as f32 * 0.7,
@@ -162,7 +165,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
     }
     let gun = weapons::bot_gun();
     let player_alive = s.dead_until.is_none();
-    let protected = now < s.protected_until;
+    let protected = now < s.protected_until || s.match_over_until.is_some();
     let player_eye = s.eye();
     let player_speed = (s.ps.velocity[0].powi(2) + s.ps.velocity[1].powi(2)).sqrt();
     let clip = s.clip.clone();
@@ -301,6 +304,7 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
             };
             let accuracy = ((0.16 - dist / 15000.0) * (1.0 - (player_speed / 380.0).min(0.6))).clamp(0.03, 0.16);
             let damage = if dist < 1500.0 { 14.0 } else { 10.0 };
+            bot.last_shot = now;
             shot = Some((eye, r2 < accuracy, damage, dist, bot.name));
         }
         if let Some((from, hit, damage, dist, name)) = shot {
@@ -445,7 +449,15 @@ pub(crate) fn damage(s: &mut Session, i: usize, amount: f32, weapon: &str, head:
     s.best_streak = s.best_streak.max(s.streak);
     let how = if head { " (headshot)" } else { "" };
     s.feed(format!("You [{weapon}] {name}{how}"));
-    if matches!(s.streak, 3 | 5 | 7 | 11 | 25) {
+    if s.match_over_until.is_none() {
+        let points = if head { 150 } else { 100 };
+        s.score += points;
+        s.popup(if head { format!("Headshot! +{points}") } else { format!("+{points}") });
+    }
+    if s.streak == 3 {
+        s.uav_ready = true;
+        s.feed("UAV ready: press 4".into());
+    } else if matches!(s.streak, 5 | 7 | 11 | 25) {
         s.feed(format!("{} kill streak!", s.streak));
     }
     true

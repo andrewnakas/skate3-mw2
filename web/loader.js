@@ -398,7 +398,8 @@ async function main() {
   const builtIn = new Set(['__test', ...pack.maps.map((m) => m.name)]);
   // A community map, a URL or a local file; null for the pack's own maps.
   const external = await externalMap(params, builtIn);
-  const wanted = params.get('map') ?? pack.default;
+  // A bigger, industrial park fights best until the clean-room MW2 maps are in.
+  const wanted = params.get('map') ?? (pack.maps.some((m) => m.name === 'IndustrialSkatePark') ? 'IndustrialSkatePark' : pack.default);
   const map = external ? null : pack.maps.find((m) => m.name === wanted) ?? null;
 
   picker.add(new Option('Test world', '__test', false, !external && map === null));
@@ -552,3 +553,12 @@ async function main() {
 }
 
 main().catch((e) => globalThis.skateFatal(String(e && e.stack || e)));
+
+// "Click to play": on foot the game needs the pointer locked (MW2_ON_FOOT is set by the engine).
+setInterval(() => {
+  const pill = document.getElementById('clicktoplay');
+  const overlay = document.getElementById('overlay');
+  if (!pill) return;
+  const started = !overlay || overlay.style.display === 'none' || overlay.hidden;
+  pill.hidden = !(started && globalThis.MW2_ON_FOOT && !document.pointerLockElement);
+}, 250);

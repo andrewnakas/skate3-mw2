@@ -164,6 +164,8 @@ pub(crate) struct Loadout {
     bloom: f32,
     pub hitmarker_until: f32,
     flash_until: f32,
+    knife_ready: f32,
+    knife_until: f32,
 }
 
 impl Loadout {
@@ -183,6 +185,8 @@ impl Loadout {
             bloom: 0.0,
             hitmarker_until: 0.0,
             flash_until: 0.0,
+            knife_ready: 0.0,
+            knife_until: 0.0,
         }
     }
     pub fn gun(&self) -> &Gun {
@@ -426,6 +430,29 @@ pub(crate) fn tick(world: &mut World, s: &mut Session, dt: f32) {
         s.weapons.reload_until = Some(now + gun.reload_s);
         play(world, Sfx::Reload, 0.7);
     }
+    // Knife: MW2's melee kills in one hit at lunge range.
+    if c.knife && !dead && now >= s.weapons.knife_ready {
+        s.weapons.knife_ready = now + 0.9;
+        s.weapons.knife_until = now + 0.35;
+        s.weapons.reload_until = None;
+        play(world, Sfx::Knife, 0.7);
+        let eye = s.eye();
+        let f = s.view_dir();
+        let target = s.bots.iter().enumerate().filter(|(_, b)| b.alive).find_map(|(i, b)| {
+            let d = [b.ps.origin[0] - eye[0], b.ps.origin[1] - eye[1]];
+            let dist = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            let ahead = (d[0] * f[0] + d[1] * f[1]) / dist.max(1.0);
+            (dist < 90.0 && ahead > 0.5 && (b.ps.origin[2] - s.ps.origin[2]).abs() < 60.0).then_some(i)
+        });
+        if let Some(i) = target {
+            s.weapons.hitmarker_until = now + 0.18;
+            play(world, Sfx::HitMarker, 0.7);
+            if bots::damage(s, i, 200.0, "Knife", false) {
+                play(world, Sfx::Kill, 0.6);
+            }
+        }
+    }
+    let busy = busy || now < s.weapons.knife_until;
     let sprinting = s.ps.pm_flags & playerstate_iw4::pm_flags::SPRINTING != 0;
     let trigger = if gun.auto { c.fire } else { c.fire_pressed };
     if trigger && !busy && !sprinting && now >= s.weapons.ready_at {
@@ -545,6 +572,13 @@ fn animate_viewmodel(world: &mut World, s: &Session, gun: &Gun, _dt: f32) {
     }
     if s.now < w.switch_until {
         pos.y -= (w.switch_until - s.now) * 0.5;
+    }
+    if s.now < w.knife_until {
+        // Knife swing: the gun swipes across and forward.
+        let k = 1.0 - (w.knife_until - s.now) / 0.35;
+        let swing = (k * std::f32::consts::PI).sin();
+        pos += Vec3::new(-0.12 * swing, 0.03 * swing, -0.1 * swing);
+        rot *= Quat::from_rotation_z(0.9 * swing) * Quat::from_rotation_y(0.5 * swing);
     }
     if w.scoped() || s.dead_until.is_some() {
         pos.y -= 1.0;
